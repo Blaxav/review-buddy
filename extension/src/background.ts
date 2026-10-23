@@ -1,0 +1,95 @@
+import type Browser from "webextension-polyfill";
+import { HELPER_URL, type AskRequest, type StreamEvent } from "../../shared/protocol";
+import { ASK_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
+
+const UNREACHABLE = `The helper isn't reachable on ${HELPER_URL}. Start it with \`bun run helper\`.`;
+
+class HelperError extends Error {
+  constructor(message: string, readonly reason?: "unreachable" | "token") {
+    super(message);
+  }
+}
+
+async function helperFetch(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
+  const { token } = (await browser.storage.local.get("token")) as { token?: string };
+  if (!token) throw new HelperError("Paste the helper token to connect.", "token");
+  let res: Response;
+  try {
+    res = await fetch(HELPER_URL + path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new HelperError(UNREACHABLE, "unreachable");
+  }
+  if (res.status === 401) throw new HelperError("The helper rejected the token.", "token");
+  if (!res.ok) {
+    const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new HelperError(error ?? `Helper error ${res.status}`);
+  }
+  return res;
+}
+
+async function handleRequest(request: BackgroundRequest): Promise<BackgroundResponse> {
+  switch (request.kind) {
+    case "check":
+      await helperFetch("/health");
+      return { ok: true };
+    case "set-token":
+      await browser.storage.local.set({ token: request.token.trim() });
+      await helperFetch("/health");
+      return { ok: true };
+    case "warm":
+    case "stop":
+    case "reset":
+      await helperFetch(`/${request.kind}`, { pr: request.pr });
+      return { ok: true };
+    case "post-comment": {
+      const res = await helperFetch("/comments", { pr: request.pr, comment: request.comment });
+      const { url } = (await res.json()) as { url: string };
+      return { ok: true, url };
+    }
+  }
+}
+
+browser.runtime.onMessage.addListener((message: unknown) =>
+  handleRequest(message as BackgroundRequest).catch(
+    (error: unknown): BackgroundResponse => ({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      reason: error instanceof HelperError ? error.reason : undefined,
+    }),
+  ),
+);
+
+// Streams one answer: the content script sends an AskRequest on the port and
+// receives StreamEvents until "done" or "error". Closing the port cancels the fetch.
+browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
+  if (port.name !== ASK_PORT) return;
+  const abort = new AbortController();
+  port.onDisconnect.addListener(() => abort.abort());
+  const send = (event: StreamEvent) => {
+    if (!abort.signal.aborted) port.postMessage(event);
+  };
+
+  port.onMessage.addListener(async (message: unknown) => {
+    try {
+      const res = await helperFetch("/ask", message as AskRequest, abort.signal);
+      const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += value;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) if (line) send(JSON.parse(line) as StreamEvent);
+      }
+    } catch (error) {
+      send({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+});

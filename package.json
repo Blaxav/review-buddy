@@ -1,0 +1,21 @@
+{
+  "name": "review-ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "helper": "bun run helper/server.ts",
+    "token": "bun run helper/print-token.ts",
+    "build:extension": "bun run scripts/build-extension.ts",
+    "build:helper": "bun build helper/server.ts --compile --outfile dist/review-ai-helper",
+    "check": "tsc --noEmit && bun test"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "marked": "18.1.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "@types/webextension-polyfill": "0.12.6",
+    "typescript": "7.0.2"
+  }
+}
