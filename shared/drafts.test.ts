@@ -27,6 +27,11 @@ describe("parseDraftComments", () => {
     expect(parseDraftComments(text)).toEqual([{ path: "a", line: 2, side: "RIGHT", body: "x" }]);
   });
 
+  test("keeps a range that starts on the other side", () => {
+    const text = '```review-comments\n[{"path": "a", "line": 2, "side": "RIGHT", "start_line": 9, "start_side": "LEFT", "body": "x"}]\n```';
+    expect(parseDraftComments(text)).toEqual([{ path: "a", line: 2, side: "RIGHT", startLine: 9, startSide: "LEFT", body: "x" }]);
+  });
+
   test("skips a block that isn't valid JSON", () => {
     expect(parseDraftComments("```review-comments\n[{oops\n```")).toEqual([]);
   });

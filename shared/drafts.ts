@@ -29,7 +29,7 @@ export function stripDraftComments(text: string): string {
 
 function toDraft(item: unknown): DraftComment | null {
   if (typeof item !== "object" || item === null) return null;
-  const { path, line, side, start_line, body } = item as Record<string, unknown>;
+  const { path, line, side, start_line, start_side, body } = item as Record<string, unknown>;
   if (typeof path !== "string" || typeof body !== "string") return null;
   if (!Number.isInteger(line) || (line as number) < 1) return null;
   const draft: DraftComment = {
@@ -38,8 +38,12 @@ function toDraft(item: unknown): DraftComment | null {
     side: side === "LEFT" ? "LEFT" : "RIGHT",
     body,
   };
-  if (Number.isInteger(start_line) && (start_line as number) < draft.line) {
+  if (!Number.isInteger(start_line) || (start_line as number) < 1) return draft;
+  const startSide = start_side === "LEFT" || start_side === "RIGHT" ? start_side : draft.side;
+  // Line numbers on different sides belong to different files, so they don't compare.
+  if (startSide !== draft.side || (start_line as number) < draft.line) {
     draft.startLine = start_line as number;
+    if (startSide !== draft.side) draft.startSide = startSide;
   }
   return draft;
 }

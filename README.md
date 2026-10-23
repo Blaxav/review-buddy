@@ -9,8 +9,9 @@ github.com PR page in Safari
                                                              └─ gh api      (posts the comments you approve)
 ```
 
-- **Helper** (`helper/`): a Bun server. For each PR it checks out the head in a worktree under `~/.review-ai/worktrees`, then keeps one `claude` process running in it, so follow-up questions answer in about a second. Claude only gets read-only tools (`Read`, `Grep`, `Glob`, `git diff/log/show/blame`). After 30 minutes idle the process exits, and the next question resumes the conversation.
+- **Helper** (`helper/`): a Bun server. It clones each repository once under `~/.review-ai/repos` and checks each PR's head out in a worktree under `~/.review-ai/worktrees`. It then keeps one `claude` process running in that worktree per conversation (the PR chat and each line thread), so follow-up questions answer in about a second. Claude only gets read-only tools (`Read`, `Grep`, `Glob`, `git diff/log/show/blame`). After 30 minutes idle the process exits, and the next question resumes the conversation.
 - **Extension** (`extension/`): the overlay and a background script. The background script holds the helper token and makes every call to the helper, because GitHub's CSP blocks localhost from the page.
+- **Line threads**: select lines in the diff as on GitHub (click a line number, shift-click another), then click **Chat with Claude about lines …**. The thread gets its own Claude conversation, primed with those diff rows, and its own tab in the panel. **Draft comment** asks Claude to write the comment on exactly those lines; **Comment** opens an empty one for you to write.
 - **Comments**: Claude proposes them in a `review-comments` JSON block. Each one shows as an editable card, and nothing is posted until you click **Post**.
 
 ## Setup

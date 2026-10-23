@@ -1,5 +1,5 @@
 import type Browser from "webextension-polyfill";
-import type { DraftComment, PrRef } from "../../shared/protocol";
+import type { DraftComment, LineSelection, PrRef, ThreadInfo } from "../../shared/protocol";
 
 // Safari exposes the promise-based `browser` namespace natively.
 declare global {
@@ -12,12 +12,13 @@ export type BackgroundRequest =
   | { kind: "check" }
   | { kind: "set-token"; token: string }
   | { kind: "warm"; pr: PrRef }
-  | { kind: "stop"; pr: PrRef }
-  | { kind: "reset"; pr: PrRef }
+  | { kind: "thread"; pr: PrRef; selection: LineSelection }
+  | { kind: "stop"; pr: PrRef; selection?: LineSelection }
+  | { kind: "reset"; pr: PrRef; selection?: LineSelection }
   | { kind: "post-comment"; pr: PrRef; comment: DraftComment };
 
 export type BackgroundResponse =
-  | { ok: true; url?: string }
+  | { ok: true; url?: string; thread?: ThreadInfo }
   | { ok: false; error: string; reason?: "unreachable" | "token" };
 
 export const ASK_PORT = "ask";

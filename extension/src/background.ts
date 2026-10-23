@@ -1,5 +1,5 @@
 import type Browser from "webextension-polyfill";
-import { HELPER_URL, type AskRequest, type StreamEvent } from "../../shared/protocol";
+import { HELPER_URL, type AskRequest, type StreamEvent, type ThreadInfo } from "../../shared/protocol";
 import { ASK_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
 
 const UNREACHABLE = `The helper isn't reachable on ${HELPER_URL}. Start it with \`bun run helper\`.`;
@@ -43,10 +43,16 @@ async function handleRequest(request: BackgroundRequest): Promise<BackgroundResp
       await helperFetch("/health");
       return { ok: true };
     case "warm":
+      await helperFetch("/warm", { pr: request.pr });
+      return { ok: true };
     case "stop":
     case "reset":
-      await helperFetch(`/${request.kind}`, { pr: request.pr });
+      await helperFetch(`/${request.kind}`, { pr: request.pr, selection: request.selection });
       return { ok: true };
+    case "thread": {
+      const res = await helperFetch("/thread", { pr: request.pr, selection: request.selection });
+      return { ok: true, thread: (await res.json()) as ThreadInfo };
+    }
     case "post-comment": {
       const res = await helperFetch("/comments", { pr: request.pr, comment: request.comment });
       const { url } = (await res.json()) as { url: string };

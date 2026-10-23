@@ -66,6 +66,32 @@ textarea, input {
 }
 .panel[hidden] { display: none; }
 
+.pill {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  border-radius: 999px;
+  padding: 8px 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.tabs { display: flex; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+.tabs[hidden] { display: none; }
+.tab { display: flex; align-items: center; border-radius: 6px; flex-shrink: 0; }
+.tab button { padding: 2px 6px; font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab.active { background: var(--bg-muted); }
+.tab.active button:first-child { color: var(--fg); font-weight: 600; }
+
+.thread { border-bottom: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.thread .where { align-self: flex-start; padding: 0; color: var(--accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.code { max-height: 180px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code .line { display: flex; white-space: pre; min-width: max-content; }
+.code .num { width: 4ch; padding-right: 8px; text-align: right; color: var(--fg-muted); user-select: none; flex-shrink: 0; }
+.code .add { background: var(--diffBlob-additionLine-bgColor, rgba(46, 160, 67, 0.15)); }
+.code .del { background: var(--diffBlob-deletionLine-bgColor, rgba(248, 81, 73, 0.15)); }
+
 .header {
   display: flex;
   align-items: center;
@@ -101,8 +127,8 @@ textarea, input {
 .composer textarea { resize: none; height: 64px; }
 .composer .row { display: flex; gap: 8px; align-items: center; }
 .composer .row .spacer { flex: 1; }
-.selection { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--fg-muted); }
-.selection span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.quote { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--fg-muted); }
+.quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .setup { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
 .setup code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg-muted); padding: 0 4px; border-radius: 4px; }

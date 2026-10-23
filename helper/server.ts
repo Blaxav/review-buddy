@@ -5,10 +5,12 @@ import {
   type PostCommentResponse,
   type PrRequest,
   type StreamEvent,
+  type ThreadInfo,
+  type ThreadRequest,
 } from "../shared/protocol";
 import { loadToken } from "./config";
 import { postComment } from "./github";
-import { BusyError, getSession, resetSession } from "./session";
+import { BusyError, getCheckout, getSession, resetSession } from "./session";
 
 const TOKEN = loadToken();
 const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
@@ -27,7 +29,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function ask({ pr, question }: AskRequest): Response {
+function ask({ pr, question, selection }: AskRequest): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -37,7 +39,7 @@ function ask({ pr, question }: AskRequest): Response {
       };
       send({ type: "status", message: "Preparing checkout…" });
       try {
-        const session = await getSession(pr);
+        const session = await getSession(pr, selection);
         session.ask(question, send);
       } catch (error) {
         send({ type: "error", message: errorMessage(error) });
@@ -61,24 +63,31 @@ async function handle(req: Request): Promise<Response> {
       case "POST /ask":
         return ask((await req.json()) as AskRequest);
       case "POST /warm": {
-        const { pr } = (await req.json()) as PrRequest;
-        (await getSession(pr)).start();
+        const { pr, selection } = (await req.json()) as PrRequest;
+        (await getSession(pr, selection)).start();
         return json({ ok: true });
       }
+      case "POST /thread": {
+        // Opens a line thread: resolves its lines and starts its Claude process.
+        const { pr, selection } = (await req.json()) as ThreadRequest;
+        const session = await getSession(pr, selection);
+        session.start();
+        return json(session.thread satisfies ThreadInfo | undefined);
+      }
       case "POST /stop": {
-        const { pr } = (await req.json()) as PrRequest;
-        (await getSession(pr)).stop();
+        const { pr, selection } = (await req.json()) as PrRequest;
+        (await getSession(pr, selection)).stop();
         return json({ ok: true });
       }
       case "POST /reset": {
-        const { pr } = (await req.json()) as PrRequest;
-        await resetSession(pr);
+        const { pr, selection } = (await req.json()) as PrRequest;
+        await resetSession(pr, selection);
         return json({ ok: true });
       }
       case "POST /comments": {
         const { pr, comment } = (await req.json()) as PostCommentRequest;
-        const session = await getSession(pr);
-        const response: PostCommentResponse = { url: await postComment(pr, session.headSha, comment) };
+        const { info } = await getCheckout(pr);
+        const response: PostCommentResponse = { url: await postComment(pr, info.headRefOid, comment) };
         return json(response);
       }
       default:

@@ -1,8 +1,9 @@
 import type { Subprocess } from "bun";
-import { prKey, type PrRef, type StreamEvent } from "../shared/protocol";
+import { prKey, type LineSelection, type PrRef, type StreamEvent, type ThreadInfo } from "../shared/protocol";
+import { selectionKey } from "../shared/selection";
 import { mapClaudeLine } from "./claude-events";
-import { checkoutPr, type Checkout } from "./github";
-import { systemPrompt } from "./prompt";
+import { checkoutPr, fetchThread, type Checkout } from "./github";
+import { systemPrompt, threadPrompt } from "./prompt";
 
 const IDLE_TIMEOUT_MS = 30 * 60_000;
 
@@ -17,20 +18,21 @@ export class BusyError extends Error {
 
 type ClaudeProcess = Subprocess<"pipe", "pipe", "inherit">;
 
-// One long-lived `claude` process per PR, so follow-up questions skip its
-// multi-second startup. After an idle timeout or a stop, the process exits and
-// the next question restarts it with --resume, keeping the conversation.
+// One long-lived `claude` process per conversation (the PR chat, or a line
+// thread), so follow-up questions skip its multi-second startup. After an idle
+// timeout or a stop, the process exits and the next question restarts it with
+// --resume, keeping the conversation.
 export class PrSession {
   private proc: ClaudeProcess | null = null;
   private claudeSessionId: string | null = null;
   private listener: ((event: StreamEvent) => void) | null = null;
   private idleTimer: Timer | null = null;
 
-  constructor(readonly pr: PrRef, readonly checkout: Checkout) {}
-
-  get headSha(): string {
-    return this.checkout.info.headRefOid;
-  }
+  constructor(
+    readonly checkout: Checkout,
+    private readonly prompt: string,
+    readonly thread?: ThreadInfo,
+  ) {}
 
   start(): void {
     this.ensureProcess();
@@ -53,7 +55,6 @@ export class PrSession {
   private ensureProcess(): ClaudeProcess {
     this.touch();
     if (this.proc) return this.proc;
-    const { dir, info } = this.checkout;
     const args = [
       "claude", "-p",
       "--input-format", "stream-json",
@@ -64,10 +65,10 @@ export class PrSession {
       "--setting-sources", "",
       "--strict-mcp-config",
       "--allowedTools", ...ALLOWED_TOOLS,
-      "--append-system-prompt", systemPrompt(this.pr, info),
+      "--append-system-prompt", this.prompt,
     ];
     if (this.claudeSessionId) args.push("--resume", this.claudeSessionId);
-    const proc = Bun.spawn(args, { cwd: dir, stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+    const proc = Bun.spawn(args, { cwd: this.checkout.dir, stdin: "pipe", stdout: "pipe", stderr: "inherit" });
     this.proc = proc;
     void this.pump(proc);
     return proc;
@@ -122,23 +123,42 @@ export class PrSession {
   }
 }
 
+const checkouts = new Map<string, Promise<Checkout>>();
 const sessions = new Map<string, Promise<PrSession>>();
 
-export function getSession(pr: PrRef): Promise<PrSession> {
-  const key = prKey(pr);
-  let session = sessions.get(key);
-  if (!session) {
-    session = checkoutPr(pr).then((checkout) => new PrSession(pr, checkout));
-    session.catch(() => sessions.delete(key));
-    sessions.set(key, session);
+function cached<T>(map: Map<string, Promise<T>>, key: string, create: () => Promise<T>): Promise<T> {
+  let value = map.get(key);
+  if (!value) {
+    value = create();
+    value.catch(() => map.delete(key));
+    map.set(key, value);
   }
-  return session;
+  return value;
 }
 
-// Drops the conversation; the next question checks out the PR's latest head.
-export async function resetSession(pr: PrRef): Promise<void> {
-  const key = prKey(pr);
+export function getCheckout(pr: PrRef): Promise<Checkout> {
+  return cached(checkouts, prKey(pr), () => checkoutPr(pr));
+}
+
+function sessionKey(pr: PrRef, selection?: LineSelection): string {
+  return selection ? `${prKey(pr)} ${selectionKey(selection)}` : prKey(pr);
+}
+
+export function getSession(pr: PrRef, selection?: LineSelection): Promise<PrSession> {
+  return cached(sessions, sessionKey(pr, selection), async () => {
+    const checkout = await getCheckout(pr);
+    if (!selection) return new PrSession(checkout, systemPrompt(pr, checkout.info));
+    const thread = await fetchThread(checkout, selection);
+    return new PrSession(checkout, threadPrompt(pr, checkout.info, thread, selection), thread);
+  });
+}
+
+// Drops the conversation. Resetting the PR chat also makes the next question
+// check out the PR's latest head.
+export async function resetSession(pr: PrRef, selection?: LineSelection): Promise<void> {
+  const key = sessionKey(pr, selection);
   const session = sessions.get(key);
   sessions.delete(key);
+  if (!selection) checkouts.delete(prKey(pr));
   (await session?.catch(() => null))?.stop();
 }

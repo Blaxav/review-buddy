@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { DraftComment, PrRef } from "../shared/protocol";
+import type { DraftComment, LineSelection, PrRef, ThreadInfo } from "../shared/protocol";
 import { REPOS_DIR, WORKTREES_DIR } from "./config";
+import { parseDiffRows, parseNameStatus, selectRows } from "./diff";
 
 export type PrInfo = {
   title: string;
@@ -11,7 +12,8 @@ export type PrInfo = {
   headRefOid: string;
 };
 
-export type Checkout = { dir: string; info: PrInfo };
+// `mergeBase` is the commit GitHub diffs the PR head against.
+export type Checkout = { dir: string; info: PrInfo; mergeBase: string };
 
 async function run(cmd: string[], cwd?: string): Promise<string> {
   const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
@@ -56,7 +58,20 @@ export async function checkoutPr(pr: PrRef): Promise<Checkout> {
     mkdirSync(dirname(dir), { recursive: true });
     await run(["git", "worktree", "add", "--quiet", "--detach", dir, info.headRefOid], repoDir);
   }
-  return { dir, info };
+  const mergeBase = (await run(["git", "merge-base", info.baseRefOid, info.headRefOid], dir)).trim();
+  return { dir, info, mergeBase };
+}
+
+// Finds the file GitHub's anchor names and the diff rows of the selection.
+export async function fetchThread({ dir, mergeBase }: Checkout, selection: LineSelection): Promise<ThreadInfo> {
+  const changed = parseNameStatus(await run(["git", "diff", "--name-status", "-z", "-M", mergeBase, "HEAD"], dir));
+  const sha256 = (path: string) => new Bun.CryptoHasher("sha256").update(path).digest("hex");
+  const file = changed.find((f) => sha256(f.newPath) === selection.fileHash || sha256(f.oldPath) === selection.fileHash);
+  if (!file) throw new Error("The selected lines aren't in a file this PR changes.");
+  const diff = await run(["git", "diff", "-M", "--unified=1000000", mergeBase, "HEAD", "--", file.oldPath, file.newPath], dir);
+  const rows = selectRows(parseDiffRows(diff), selection);
+  if (rows.length === 0) throw new Error(`Couldn't find the selected lines in ${file.newPath}.`);
+  return { path: file.newPath, rows };
 }
 
 export async function postComment(pr: PrRef, commitId: string, comment: DraftComment): Promise<string> {
@@ -69,7 +84,7 @@ export async function postComment(pr: PrRef, commitId: string, comment: DraftCom
     "-f", `side=${comment.side}`,
   ];
   if (comment.startLine !== undefined) {
-    args.push("-F", `start_line=${comment.startLine}`, "-f", `start_side=${comment.side}`);
+    args.push("-F", `start_line=${comment.startLine}`, "-f", `start_side=${comment.startSide ?? comment.side}`);
   }
   const created = JSON.parse(await run(args)) as { html_url: string };
   return created.html_url;
