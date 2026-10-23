@@ -21,7 +21,7 @@ Requires [Bun](https://bun.sh), the GitHub CLI logged in (`gh auth login`), Clau
 bun install
 ./scripts/install-launchd.sh   # helper runs now and at every login; logs in ~/.review-ai/helper.log
 bun run token                  # the token to paste into the overlay once
-./scripts/make-safari-app.sh   # builds the app that carries the extension and opens it once
+./scripts/make-safari-app.sh   # builds the app, installs it in /Applications and opens it once
 ```
 
 Then:
