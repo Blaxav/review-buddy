@@ -30,3 +30,8 @@ pkill -f "$APP/Contents/MacOS/Review AI" || true
 rm -rf "$APP"
 cp -R "safari/build/Build/Products/Debug/Review AI.app" "$APP"
 open "$APP"
+
+# Safari turns this setting off each time it quits, and while it is off it
+# hides unsigned extensions entirely.
+echo "If Review AI is missing from Safari: Settings → Developer → turn on Allow unsigned extensions,"
+echo "then Settings → Extensions → enable Review AI and allow it on github.com."
