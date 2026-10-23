@@ -3,6 +3,13 @@
   "name": "Review AI",
   "description": "Ask Claude about the GitHub pull request you're reviewing, and post the comments it drafts.",
   "version": "0.1.0",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png",
+    "256": "icons/icon-256.png",
+    "512": "icons/icon-512.png"
+  },
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*"],
   "background": {

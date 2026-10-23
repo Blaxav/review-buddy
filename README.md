@@ -21,22 +21,22 @@ Requires [Bun](https://bun.sh), the GitHub CLI logged in (`gh auth login`), Clau
 bun install
 ./scripts/install-launchd.sh   # helper runs now and at every login; logs in ~/.review-ai/helper.log
 bun run token                  # the token to paste into the overlay once
-./scripts/make-safari-app.sh   # generates safari/Review AI/Review AI.xcodeproj
+./scripts/make-safari-app.sh   # builds the app that carries the extension and opens it once
 ```
 
 Then:
 
-1. Open the Xcode project, pick the **Review AI (macOS)** scheme and run it once. This installs the app that carries the extension.
-2. In Safari, open Settings → Advanced and turn on **Show features for web developers**. Then open Settings → Developer and turn on **Allow unsigned extensions**. Safari turns this setting off whenever it quits, unless the app is signed with your Apple developer team.
-3. In Settings → Extensions, enable **Review AI** and allow it on `github.com`.
-4. Open a PR, click **Ask Claude** and paste the token.
+1. In Safari, open Settings → Advanced and turn on **Show features for web developers**. Then open Settings → Developer and turn on **Allow unsigned extensions**. Safari turns this setting off whenever it quits, unless the app is signed with your Apple developer team.
+2. In Settings → Extensions, enable **Review AI** and allow it on `github.com`.
+3. Open a PR, click **Ask Claude** and paste the token.
 
 ## Development
 
 ```sh
 bun run check            # type check + tests
 bun run helper           # run the helper in the foreground (stop the launchd one first)
-bun run build:extension  # rebuild extension/dist, then rebuild in Xcode
+./scripts/make-safari-app.sh  # after an extension change; then reload github.com
+bun run scripts/make-icons.ts # redraws extension/icons
 ```
 
 Remove the login agent with `launchctl bootout gui/$(id -u)/ai.review-ai.helper`.

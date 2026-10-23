@@ -16,4 +16,5 @@ if (!result.success) {
   process.exit(1);
 }
 cpSync("extension/manifest.json", `${outdir}/manifest.json`);
+cpSync("extension/icons", `${outdir}/icons`, { recursive: true });
 console.log(`Built ${result.outputs.length} files into ${outdir}`);
