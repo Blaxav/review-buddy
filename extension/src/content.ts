@@ -2,7 +2,7 @@ import type Browser from "webextension-polyfill";
 import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
-import { ASK_PORT, type BackgroundResponse } from "./messages";
+import { ASK_PORT } from "./messages";
 import css from "./overlay.css" with { type: "text" };
 import { parsePrPath } from "./pr-path";
 import { h, isolateEvents, renderMarkdown, request } from "./ui";
@@ -90,40 +90,19 @@ async function connect(): Promise<void> {
     renderChat();
     warm();
   } else {
-    renderSetup(res);
+    renderConnectionError(res.error);
   }
 }
 
-function renderSetup(res: Extract<BackgroundResponse, { ok: false }>): void {
-  if (res.reason === "token") {
-    const tokenInput = h("input", { type: "password", placeholder: "Helper token" });
-    const save = h("button", { className: "primary", textContent: "Connect" });
-    const errorEl = h("div", { className: "error" });
-    save.onclick = async () => {
-      const result = await request({ kind: "set-token", token: tokenInput.value });
-      if (result.ok) await connect();
-      else errorEl.textContent = result.error;
-    };
-    body.replaceChildren(
-      h(
-        "div",
-        { className: "setup" },
-        h("div", {}, "Connect to the local helper. Get its token with ", h("code", { textContent: "bun run token" }), "."),
-        tokenInput,
-        save,
-        errorEl,
-      ),
-    );
-  } else {
-    body.replaceChildren(
-      h(
-        "div",
-        { className: "setup" },
-        h("div", { className: "error", textContent: res.error }),
-        h("button", { textContent: "Retry", onclick: () => void connect() }),
-      ),
-    );
-  }
+function renderConnectionError(error: string): void {
+  body.replaceChildren(
+    h(
+      "div",
+      { className: "setup" },
+      h("div", { className: "error", textContent: error }),
+      h("button", { textContent: "Retry", onclick: () => void connect() }),
+    ),
+  );
 }
 
 function renderChat(): void {

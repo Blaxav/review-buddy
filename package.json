@@ -4,7 +4,6 @@
   "type": "module",
   "scripts": {
     "helper": "bun run helper/server.ts",
-    "token": "bun run helper/print-token.ts",
     "build:extension": "bun run scripts/build-extension.ts",
     "build:helper": "bun build helper/server.ts --compile --outfile dist/review-ai-helper",
     "check": "tsc --noEmit && bun test"

@@ -10,7 +10,7 @@ github.com PR page in Safari
 ```
 
 - **Helper** (`helper/`): a Bun server. It clones each repository once under `~/.review-ai/repos` and checks each PR's head out in a worktree under `~/.review-ai/worktrees`. It then keeps one `claude` process running in that worktree per conversation (the PR chat and each range of lines discussed in a comment box), so follow-up questions answer in about a second. Claude only gets read-only tools (`Read`, `Grep`, `Glob`, `git diff/log/show/blame`). After 30 minutes idle the process exits, and the next question resumes the conversation.
-- **Extension** (`extension/`): the overlay and a background script. The background script holds the helper token and makes every call to the helper, because GitHub's CSP blocks localhost from the page.
+- **Extension** (`extension/`): the overlay and a background script. The background script makes every call to the helper, because GitHub's CSP blocks localhost from the page. The build puts the helper's token (`~/.review-ai/token`) into the extension, so there is nothing to paste.
 - **Claude in GitHub's comment box**: open a review comment on some lines as usual (click `+`, or drag over line numbers), and the box gets a Claude strip. **Explain** and **Find problems** discuss those lines; **Draft comment** and **Improve my comment** write into GitHub's textarea, and you post with GitHub's own **Comment** or **Start a review**. Each range of lines keeps its own conversation, with its own Claude process.
 - **Comments**: Claude proposes them in a `review-comments` JSON block. Each one shows as an editable card, and nothing is posted until you click **Post**.
 
@@ -21,7 +21,6 @@ Requires [Bun](https://bun.sh), the GitHub CLI logged in (`gh auth login`), Clau
 ```sh
 bun install
 ./scripts/install-launchd.sh   # helper runs now and at every login; logs in ~/.review-ai/helper.log
-bun run token                  # the token to paste into the overlay once
 ./scripts/make-safari-app.sh   # builds the app, installs it in /Applications and opens it once
 ```
 
@@ -29,7 +28,7 @@ Then:
 
 1. In Safari, open Settings → Advanced and turn on **Show features for web developers**. Then open Settings → Developer and turn on **Allow unsigned extensions**. Safari turns this setting off whenever it quits, unless the app is signed with your Apple developer team.
 2. In Settings → Extensions, enable **Review AI** and allow it on `github.com`.
-3. Open a PR, click **Ask Claude** and paste the token.
+3. Open a PR and click **Ask Claude**.
 
 ## Development
 

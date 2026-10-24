@@ -10,7 +10,6 @@ declare global {
 // helper token and talks to the helper (content scripts are bound by GitHub's CSP).
 export type BackgroundRequest =
   | { kind: "check" }
-  | { kind: "set-token"; token: string }
   | { kind: "warm"; pr: PrRef }
   | { kind: "thread"; pr: PrRef; selection: LineSelection }
   | { kind: "stop"; pr: PrRef; selection?: LineSelection }
@@ -19,6 +18,6 @@ export type BackgroundRequest =
 
 export type BackgroundResponse =
   | { ok: true; url?: string; thread?: ThreadInfo }
-  | { ok: false; error: string; reason?: "unreachable" | "token" };
+  | { ok: false; error: string };
 
 export const ASK_PORT = "ask";

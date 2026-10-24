@@ -2,33 +2,29 @@ import type Browser from "webextension-polyfill";
 import { HELPER_URL, type AskRequest, type StreamEvent, type ThreadInfo } from "../../shared/protocol";
 import { ASK_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
 
-const UNREACHABLE = `The helper isn't reachable on ${HELPER_URL}. Start it with \`bun run helper\`.`;
+// Set by scripts/build-extension.ts from ~/.review-ai/token.
+declare const HELPER_TOKEN: string;
 
-class HelperError extends Error {
-  constructor(message: string, readonly reason?: "unreachable" | "token") {
-    super(message);
-  }
-}
+const UNREACHABLE = `The helper isn't reachable on ${HELPER_URL}. Start it with \`bun run helper\`.`;
+const STALE_TOKEN = "The helper's token changed since this extension was built. Rebuild it with ./scripts/make-safari-app.sh.";
 
 async function helperFetch(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
-  const { token } = (await browser.storage.local.get("token")) as { token?: string };
-  if (!token) throw new HelperError("Paste the helper token to connect.", "token");
   let res: Response;
   try {
     res = await fetch(HELPER_URL + path, {
       method: body === undefined ? "GET" : "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${HELPER_TOKEN}`, "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal,
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new HelperError(UNREACHABLE, "unreachable");
+    throw new Error(UNREACHABLE);
   }
-  if (res.status === 401) throw new HelperError("The helper rejected the token.", "token");
+  if (res.status === 401) throw new Error(STALE_TOKEN);
   if (!res.ok) {
     const { error } = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new HelperError(error ?? `Helper error ${res.status}`);
+    throw new Error(error ?? `Helper error ${res.status}`);
   }
   return res;
 }
@@ -36,10 +32,6 @@ async function helperFetch(path: string, body?: unknown, signal?: AbortSignal): 
 async function handleRequest(request: BackgroundRequest): Promise<BackgroundResponse> {
   switch (request.kind) {
     case "check":
-      await helperFetch("/health");
-      return { ok: true };
-    case "set-token":
-      await browser.storage.local.set({ token: request.token.trim() });
       await helperFetch("/health");
       return { ok: true };
     case "warm":
@@ -68,7 +60,6 @@ browser.runtime.onMessage.addListener((message: unknown) =>
     (error: unknown): BackgroundResponse => ({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
-      reason: error instanceof HelperError ? error.reason : undefined,
     }),
   ),
 );

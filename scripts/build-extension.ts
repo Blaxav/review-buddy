@@ -1,5 +1,6 @@
 // Bundles the extension into extension/dist, the folder Safari's converter wraps.
 import { cpSync, rmSync } from "node:fs";
+import { loadToken } from "../helper/config";
 
 const outdir = "extension/dist";
 rmSync(outdir, { recursive: true, force: true });
@@ -10,6 +11,9 @@ const result = await Bun.build({
   target: "browser",
   format: "iife",
   minify: false,
+  // The helper's token goes into the build, so there is nothing to paste: the
+  // extension is built on the machine that runs the helper.
+  define: { HELPER_TOKEN: JSON.stringify(loadToken()) },
 });
 if (!result.success) {
   for (const log of result.logs) console.error(log);
