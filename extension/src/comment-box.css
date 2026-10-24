@@ -1,60 +1,31 @@
-/* The Claude strip inside GitHub's comment box. It lives in a shadow root;
-   GitHub's Primer CSS variables still inherit, so it follows the theme. */
-:host {
-  all: initial;
-  display: block;
-  --bg: var(--bgColor-default, #ffffff);
-  --bg-muted: var(--bgColor-muted, #f6f8fa);
-  --fg: var(--fgColor-default, #1f2328);
-  --fg-muted: var(--fgColor-muted, #59636e);
-  --border: var(--borderColor-default, #d1d9e0);
-  --accent: var(--fgColor-accent, #0969da);
-  --done: var(--fgColor-done, #8250df);
-  --danger: var(--fgColor-danger, #d1242f);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
-  color: var(--fg);
+/* The Claude strip at the top of GitHub's comment box. Tokens and shared parts are in theme.css. */
+:host { display: block; }
+
+.strip {
+  margin: 8px 8px 0;
+  border: 1px solid color-mix(in srgb, var(--claude) 30%, var(--border));
+  border-radius: 10px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--claude) 7%, var(--bg)), var(--bg) 48px);
+  overflow: hidden;
 }
 
-.strip { margin: 8px 8px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-muted); }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; }
+.brand { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; margin-right: 4px; }
+.brand .icon { width: 14px; height: 14px; }
 
-.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px 8px; }
-.brand { color: var(--done); font-weight: 600; font-size: 12px; margin-right: 4px; }
+.chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; border-color: var(--border-muted); }
+.chip.key { background: var(--claude-soft); border-color: color-mix(in srgb, var(--claude) 40%, var(--border)); }
+.chip.key:hover { background: color-mix(in srgb, var(--claude) 20%, var(--bg)); }
 
-button {
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  border-radius: 6px;
-  padding: 2px 8px;
-}
-button:hover { border-color: var(--fg-muted); }
+.turns { max-height: 340px; overflow-y: auto; border-top: 1px solid var(--border-muted); padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+.turn { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.turn .question { font-size: 12px; font-weight: 600; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn .use { align-self: flex-start; font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+.turn .use .icon { width: 13px; height: 13px; }
 
-.turns { max-height: 320px; overflow-y: auto; border-top: 1px solid var(--border); padding: 8px; display: flex; flex-direction: column; gap: 12px; background: var(--bg); }
-.turns[hidden] { display: none; }
-.turn { overflow-wrap: anywhere; }
-.turn .question { font-size: 12px; font-weight: 600; color: var(--fg-muted); margin-bottom: 4px; }
-.turn p { margin: 0 0 8px; }
-.turn pre { background: var(--bg-muted); padding: 8px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
-.turn code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.turn a { color: var(--accent); }
-.turn .use { margin-top: 4px; }
-.status { color: var(--fg-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.error { color: var(--danger); font-size: 12px; }
-
-.ask { display: flex; gap: 4px; padding: 4px 8px 8px; }
-.ask textarea {
-  flex: 1;
-  font: inherit;
-  font-size: 13px;
-  color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  resize: none;
-  field-sizing: content;
-  max-height: 120px;
-}
+.ask { padding: 0 10px 10px; }
+.turns:not([hidden]) + .ask { padding-top: 10px; border-top: 1px solid var(--border-muted); }
+.ask .input-box { border-radius: 12px; padding: 4px 4px 4px 10px; }
+.ask textarea { font-size: 13px; height: 26px; padding: 3px 0; max-height: 120px; }
+.ask .send { width: 24px; height: 24px; }
+.ask .send .icon { width: 12px; height: 12px; }

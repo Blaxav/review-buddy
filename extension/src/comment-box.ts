@@ -2,9 +2,11 @@ import { commentFromAnswer, stripDraftComments } from "../../shared/drafts";
 import { prKey, type AskRequest, type LineSelection, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { selectionFromAnchors, selectionKey } from "../../shared/selection";
 import css from "./comment-box.css" with { type: "text" };
+import { icon } from "./icons";
 import { ASK_PORT } from "./messages";
 import { parsePrPath } from "./pr-path";
-import { h, isolateEvents, renderMarkdown, request } from "./ui";
+import theme from "./theme.css" with { type: "text" };
+import { autoGrow, h, isolateEvents, renderMarkdown, request } from "./ui";
 import type Browser from "webextension-polyfill";
 
 // GitHub's box for a new review comment on the lines selected in the diff.
@@ -97,7 +99,8 @@ function mount(pr: PrRef, box: Element): void {
   isolateEvents(root, ["keydown", "keyup", "keypress", "mousedown", "mouseup", "pointerdown", "click"]);
 
   const input = h("textarea", { rows: 1, placeholder: "Ask Claude about these lines…" });
-  const sendButton = h("button", { textContent: "Ask" });
+  const resizeInput = autoGrow(input);
+  const sendButton = h("button", { className: "send", ariaLabel: "Ask" });
   const turnsEl = h("div", { className: "turns" });
   const key = `${prKey(pr)} ${selectionKey(selection)}`;
   const chat: BoxChat = chats.get(key) ?? { pr, selection, turns: [], port: null, warmed: false, box, turnsEl, sendButton };
@@ -108,6 +111,7 @@ function mount(pr: PrRef, box: Element): void {
     const text = input.value.trim();
     if (!text || chat.port) return;
     input.value = "";
+    resizeInput();
     ask(chat, text, text, false);
   };
   input.addEventListener("keydown", (e) => {
@@ -118,24 +122,24 @@ function mount(pr: PrRef, box: Element): void {
   });
   sendButton.onclick = () => (chat.port ? void request({ kind: "stop", pr, selection }) : submit());
 
-  const action = (label: string, title: string, run: () => void) =>
-    h("button", { className: "action", textContent: label, title, onclick: run });
+  const chip = (label: string, title: string, run: () => void, className = "chip") =>
+    h("button", { className, textContent: label, title, onclick: run });
   root.append(
-    h("style", { textContent: css }),
+    h("style", { textContent: theme + css }),
     h(
       "div",
       { className: "strip" },
       h(
         "div",
         { className: "bar" },
-        h("span", { className: "brand", textContent: "✦ Claude" }),
-        action("Explain", "Explain these lines", () => ask(chat, EXPLAIN_PROMPT, "Explain", false)),
-        action("Find problems", "Look for bugs in these lines", () => ask(chat, CHECK_PROMPT, "Find problems", false)),
-        action("Draft comment", "Write the comment from the conversation", () => ask(chat, DRAFT_PROMPT, "Draft comment", true)),
-        action("Improve my comment", "Rewrite what you typed below", () => improve(chat)),
+        h("span", { className: "brand" }, h("span", { className: "mark" }, icon("sparkle")), "Claude"),
+        chip("Explain", "Explain these lines", () => ask(chat, EXPLAIN_PROMPT, "Explain", false)),
+        chip("Find problems", "Look for bugs in these lines", () => ask(chat, CHECK_PROMPT, "Find problems", false)),
+        chip("Draft comment", "Write the comment from the conversation", () => ask(chat, DRAFT_PROMPT, "Draft comment", true), "chip key"),
+        chip("Improve my comment", "Rewrite what you typed below", () => improve(chat)),
       ),
       turnsEl,
-      h("div", { className: "ask" }, input, sendButton),
+      h("div", { className: "ask" }, h("div", { className: "input-box" }, input, sendButton)),
     ),
   );
   box.prepend(host);
@@ -240,23 +244,28 @@ function render(chat: BoxChat): void {
   turnsEl.replaceChildren(...chat.turns.map((turn) => renderTurn(chat, turn)));
   if (chat.error) turnsEl.append(h("div", { className: "error", textContent: chat.error }));
   turnsEl.hidden = turnsEl.childElementCount === 0;
-  chat.sendButton.textContent = chat.port ? "Stop" : "Ask";
+  chat.sendButton.replaceChildren(icon(chat.port ? "stop" : "send"));
+  chat.sendButton.title = chat.port ? "Stop" : "Ask (Enter)";
   if (atBottom) turnsEl.scrollTop = turnsEl.scrollHeight;
 }
 
 function renderTurn(chat: BoxChat, turn: Turn): HTMLElement {
-  const el = h("div", { className: "turn" }, h("div", { className: "question", textContent: turn.label }));
+  const el = h("div", { className: "turn" }, h("div", { className: "question", textContent: turn.label, title: turn.label }));
   if (turn.answer) el.append(renderMarkdown(stripDraftComments(turn.answer)));
   if (turn.status) el.append(h("div", { className: "status", textContent: turn.status }));
   if (turn.error) el.append(h("div", { className: "error", textContent: turn.error }));
   if (!turn.streaming && !turn.error && turn.answer) {
     el.append(
-      h("button", {
-        className: "use",
-        textContent: turn.fill ? "Put back in the comment" : "Use as comment",
-        title: "Replace the comment below with this answer",
-        onclick: () => fillComment(chat, commentFromAnswer(turn.answer)),
-      }),
+      h(
+        "button",
+        {
+          className: "use",
+          title: "Replace the comment below with this answer",
+          onclick: () => fillComment(chat, commentFromAnswer(turn.answer)),
+        },
+        icon(turn.fill ? "check" : "insert"),
+        turn.fill ? "In your comment · put it back" : "Use as comment",
+      ),
     );
   }
   return el;

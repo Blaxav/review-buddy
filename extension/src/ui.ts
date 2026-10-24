@@ -24,7 +24,7 @@ export function request(req: BackgroundRequest): Promise<BackgroundResponse> {
 }
 
 export function renderMarkdown(text: string): HTMLElement {
-  const el = h("div");
+  const el = h("div", { className: "md" });
   el.innerHTML = DOMPurify.sanitize(marked.parse(text, { async: false }));
   return el;
 }
@@ -33,4 +33,15 @@ export function renderMarkdown(text: string): HTMLElement {
 // GitHub's keyboard shortcuts and click handlers would act on them.
 export function isolateEvents(root: ShadowRoot, types: string[]): void {
   for (const type of types) root.addEventListener(type, (e) => e.stopPropagation());
+}
+
+// Grows a one-row textarea with its content, up to its CSS max-height. Call
+// the returned function after setting its value from code.
+export function autoGrow(textarea: HTMLTextAreaElement): () => void {
+  const resize = () => {
+    textarea.style.height = "auto";
+    if (textarea.scrollHeight) textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+  textarea.addEventListener("input", resize);
+  return resize;
 }

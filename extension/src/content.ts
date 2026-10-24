@@ -3,9 +3,11 @@ import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
 import { ASK_PORT } from "./messages";
+import { icon } from "./icons";
 import css from "./overlay.css" with { type: "text" };
 import { parsePrPath } from "./pr-path";
-import { h, isolateEvents, renderMarkdown, request } from "./ui";
+import theme from "./theme.css" with { type: "text" };
+import { autoGrow, h, isolateEvents, renderMarkdown, request } from "./ui";
 
 const MAX_SELECTION_CHARS = 4000;
 
@@ -48,25 +50,34 @@ const panel = h(
   h(
     "div",
     { className: "header" },
-    titleEl,
-    h("button", { className: "ghost", textContent: "New chat", onclick: () => void newChat() }),
-    h("button", { className: "ghost", textContent: "✕", title: "Close", onclick: () => (panel.hidden = true) }),
+    h("span", { className: "mark" }, icon("sparkle")),
+    h("div", { className: "heading" }, h("span", { className: "name", textContent: "Claude" }), titleEl),
+    h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat")),
+    h("button", { className: "icon-button", title: "Close (Esc)", ariaLabel: "Close", onclick: () => setPanelOpen(false) }, icon("close")),
   ),
   body,
 );
-const launcher = h("button", { className: "launcher primary", textContent: "Ask Claude", onclick: () => togglePanel() });
-root.append(h("style", { textContent: css }), panel, launcher);
+const launcher = h(
+  "button",
+  { className: "launcher", title: "Ask Claude about this PR", ariaLabel: "Ask Claude", onclick: () => void setPanelOpen(true) },
+  icon("sparkle"),
+);
+root.append(h("style", { textContent: theme + css }), panel, launcher);
+panel.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") setPanelOpen(false);
+});
 
 const messagesEl = h("div", { className: "messages" });
-const input = h("textarea", { placeholder: "Ask about this PR…  (Enter to send, Shift+Enter for a new line)" });
-const sendButton = h("button", { className: "primary", textContent: "Send" });
-const selectionEl = h("div", { className: "selection" });
+const input = h("textarea", { rows: 1, placeholder: "Ask about this PR…" });
+const resizeInput = autoGrow(input);
+const sendButton = h("button", { className: "send", title: "Send (Enter)", ariaLabel: "Send" });
+const selectionEl = h("div", { className: "quote" });
 const composer = h(
   "div",
   { className: "composer" },
   selectionEl,
-  input,
-  h("div", { className: "row" }, h("span", { className: "spacer" }), sendButton),
+  h("div", { className: "input-box" }, input, sendButton),
+  h("div", { className: "hint", textContent: "Enter to send · Shift+Enter for a new line" }),
 );
 
 input.addEventListener("keydown", (e) => {
@@ -75,13 +86,17 @@ input.addEventListener("keydown", (e) => {
     submit();
   }
 });
+input.addEventListener("input", () => renderComposer());
 sendButton.addEventListener("click", () => (isStreaming() ? void stop() : submit()));
 
 // --- Panel states -----------------------------------------------------------
 
-async function togglePanel(): Promise<void> {
-  panel.hidden = !panel.hidden;
-  if (!panel.hidden) await connect();
+async function setPanelOpen(open: boolean): Promise<void> {
+  panel.hidden = !open;
+  launcher.hidden = open;
+  if (!open) return;
+  await connect();
+  input.focus();
 }
 
 async function connect(): Promise<void> {
@@ -100,7 +115,7 @@ function renderConnectionError(error: string): void {
       "div",
       { className: "setup" },
       h("div", { className: "error", textContent: error }),
-      h("button", { textContent: "Retry", onclick: () => void connect() }),
+      h("button", { textContent: "Try again", onclick: () => void connect() }),
     ),
   );
 }
@@ -113,9 +128,13 @@ function renderChat(): void {
       h(
         "div",
         { className: "empty" },
-        h("div", {}, "Ask anything about this PR. To discuss specific lines, open a comment on them: Claude is in the comment box."),
-        h("button", { textContent: "Explain this PR", onclick: () => ask(EXPLAIN_PROMPT) }),
-        h("button", { textContent: "Review and draft comments", onclick: () => ask(REVIEW_PROMPT) }),
+        h("div", { className: "badge mark" }, icon("sparkle")),
+        h("h2", { textContent: "What should we look at?" }),
+        h("p", {
+          textContent: "Claude has the whole repository checked out. For specific lines, open a review comment on them: Claude is in the comment box too.",
+        }),
+        suggestion("Explain this PR", "File by file, with the risky parts", EXPLAIN_PROMPT),
+        suggestion("Review and draft comments", "Bugs, risky changes, missing tests", REVIEW_PROMPT),
       ),
     );
   } else {
@@ -124,14 +143,26 @@ function renderChat(): void {
   renderComposer();
 }
 
+function suggestion(label: string, detail: string, prompt: string): HTMLButtonElement {
+  return h(
+    "button",
+    { className: "suggestion", ariaLabel: label, onclick: () => ask(prompt, label) },
+    h("span", {}, label, h("small", { textContent: detail })),
+    icon("chevron"),
+  );
+}
+
 function renderComposer(): void {
-  sendButton.textContent = isStreaming() ? "Stop" : "Send";
+  const streaming = isStreaming();
+  sendButton.replaceChildren(icon(streaming ? "stop" : "send"));
+  sendButton.title = streaming ? "Stop" : "Send (Enter)";
+  sendButton.disabled = !streaming && !input.value.trim();
+  selectionEl.hidden = !selection;
   selectionEl.replaceChildren();
   if (selection) {
     selectionEl.append(
-      "Selection: ",
-      h("span", { textContent: selection.replace(/\s+/g, " ") }),
-      h("button", { className: "ghost", textContent: "✕", title: "Drop selection", onclick: () => setSelection("") }),
+      h("code", { textContent: selection.replace(/\s+/g, " ") }),
+      h("button", { className: "icon-button", title: "Drop the quoted code", ariaLabel: "Drop the quoted code", onclick: () => setSelection("") }, icon("close")),
     );
   }
 }
@@ -150,11 +181,12 @@ function renderQuestion(question: Question): HTMLElement {
 function renderAnswer(answer: Answer): HTMLElement {
   const el = h("div", { className: "assistant" });
   if (answer.tools.length > 0) {
+    const count = `${answer.tools.length} step${answer.tools.length > 1 ? "s" : ""}`;
     el.append(
       h(
         "details",
-        { className: "tools" },
-        h("summary", { textContent: `Looked at ${answer.tools.length} thing${answer.tools.length > 1 ? "s" : ""}` }),
+        { className: "activity" },
+        h("summary", {}, icon("chevron"), answer.streaming ? `Working · ${count}` : `Looked into the code · ${count}`),
         ...answer.tools.map((tool) => h("div", { textContent: tool, title: tool })),
       ),
     );
@@ -172,15 +204,17 @@ function renderDraft(answer: Answer, draft: Draft): HTMLElement {
   const { comment } = draft;
   const lines = comment.startLine ? `${comment.startLine}-${comment.line}` : `${comment.line}`;
   const where = `${comment.path}:${lines}${comment.side === "LEFT" ? " (old)" : ""}`;
-  const el = h("div", { className: "draft" }, h("div", { className: "where", textContent: where }));
+  const el = h("div", { className: "draft" }, h("div", { className: "where", title: where }, icon("file"), h("span", { textContent: where })));
 
   if (draft.status === "posted") {
-    el.append(h("div", { className: "posted" }, "Posted · ", h("a", { href: draft.url, target: "_blank", textContent: "view" })));
+    el.append(
+      h("div", { className: "posted" }, icon("check"), "Posted", h("a", { href: draft.url, target: "_blank", textContent: "View on GitHub" })),
+    );
     return el;
   }
-  const bodyInput = h("textarea", { value: comment.body, rows: 4 });
+  const bodyInput = h("textarea", { value: comment.body, rows: 1 });
   bodyInput.oninput = () => (comment.body = bodyInput.value);
-  const post = h("button", { className: "primary", textContent: draft.status === "posting" ? "Posting…" : "Post" });
+  const post = h("button", { className: "primary", textContent: draft.status === "posting" ? "Posting…" : "Post comment" });
   post.disabled = draft.status === "posting";
   post.onclick = () => void postDraft(answer, draft);
   const dismiss = h("button", { textContent: "Dismiss" });
@@ -188,8 +222,10 @@ function renderDraft(answer: Answer, draft: Draft): HTMLElement {
     draft.status = "dismissed";
     renderItem(answer);
   };
-  el.append(bodyInput, h("div", { className: "actions" }, post, dismiss));
-  if (draft.error) el.append(h("div", { className: "error", textContent: draft.error }));
+  const actions = h("div", { className: "actions" }, dismiss, post);
+  if (draft.error) actions.prepend(h("div", { className: "error", textContent: draft.error }));
+  el.append(bodyInput, actions);
+  requestAnimationFrame(() => autoGrow(bodyInput)());
   return el;
 }
 
@@ -209,15 +245,17 @@ function submit(): void {
   const text = input.value.trim();
   if (!text || isStreaming()) return;
   input.value = "";
+  resizeInput();
   ask(text);
 }
 
-function ask(text: string): void {
+// `label`, when given, is what the conversation shows instead of the prompt.
+function ask(text: string, label?: string): void {
   const current = chat;
   if (!current || current.port) return;
   const question = selection ? `About this code from the diff:\n\`\`\`\n${selection}\n\`\`\`\n\n${text}` : text;
   const answer: Answer = { kind: "assistant", text: "", tools: [], streaming: true, breakBeforeText: false, drafts: [] };
-  current.items.push({ kind: "user", text: question }, answer);
+  current.items.push({ kind: "user", text: label ?? question }, answer);
   setSelection("");
 
   const port = browser.runtime.connect({ name: ASK_PORT });
