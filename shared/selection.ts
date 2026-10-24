@@ -18,6 +18,14 @@ export function parseSelectionHash(hash: string): LineSelection | null {
   return { fileHash: match[1]!, startSide, startLine, side, line };
 }
 
+// The selection between two of GitHub's line anchors (`diff-<sha256>R12`),
+// such as the first and last rows of a range a comment box is opened on.
+export function selectionFromAnchors(first: string, last: string): LineSelection | null {
+  const prefix = /^diff-[0-9a-f]{64}/.exec(first)?.[0];
+  if (!prefix || !last.startsWith(prefix)) return null;
+  return parseSelectionHash(`#${first}-${last.slice(prefix.length)}`);
+}
+
 export function selectionKey(selection: LineSelection): string {
   const { fileHash, startSide, startLine, side, line } = selection;
   return `${fileHash}:${startSide[0]}${startLine}-${side[0]}${line}`;

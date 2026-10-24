@@ -46,8 +46,10 @@ async function handleRequest(request: BackgroundRequest): Promise<BackgroundResp
       await helperFetch("/warm", { pr: request.pr });
       return { ok: true };
     case "stop":
+      await helperFetch("/stop", { pr: request.pr, selection: request.selection });
+      return { ok: true };
     case "reset":
-      await helperFetch(`/${request.kind}`, { pr: request.pr, selection: request.selection });
+      await helperFetch("/reset", { pr: request.pr });
       return { ok: true };
     case "thread": {
       const res = await helperFetch("/thread", { pr: request.pr, selection: request.selection });

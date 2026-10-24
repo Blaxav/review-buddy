@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDraftComments, stripDraftComments } from "./drafts";
+import { commentFromAnswer, parseDraftComments, stripDraftComments } from "./drafts";
 
 const answer = `Two issues.
 
@@ -44,5 +44,15 @@ describe("stripDraftComments", () => {
 
   test("hides a block that is still streaming in", () => {
     expect(stripDraftComments('Here:\n```review-comments\n[{"path": "a"')).toBe("Here:");
+  });
+});
+
+describe("commentFromAnswer", () => {
+  test("takes the first draft's body when there is a block", () => {
+    expect(commentFromAnswer(answer)).toBe("Off by one.");
+  });
+
+  test("takes the whole answer otherwise", () => {
+    expect(commentFromAnswer("  Use `>=` here.\n")).toBe("Use `>=` here.");
   });
 });

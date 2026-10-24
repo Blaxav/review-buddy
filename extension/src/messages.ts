@@ -14,7 +14,7 @@ export type BackgroundRequest =
   | { kind: "warm"; pr: PrRef }
   | { kind: "thread"; pr: PrRef; selection: LineSelection }
   | { kind: "stop"; pr: PrRef; selection?: LineSelection }
-  | { kind: "reset"; pr: PrRef; selection?: LineSelection }
+  | { kind: "reset"; pr: PrRef }
   | { kind: "post-comment"; pr: PrRef; comment: DraftComment };
 
 export type BackgroundResponse =

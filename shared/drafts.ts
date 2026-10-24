@@ -21,6 +21,12 @@ export function parseDraftComments(text: string): DraftComment[] {
   return drafts;
 }
 
+// The comment in an answer to "write the comment": the first draft when Claude
+// put it in a review-comments block anyway, else the whole answer.
+export function commentFromAnswer(text: string): string {
+  return parseDraftComments(text)[0]?.body ?? stripDraftComments(text);
+}
+
 // Removes the fences, including one still streaming in, so the drafts render
 // only as cards.
 export function stripDraftComments(text: string): string {
