@@ -117,8 +117,9 @@ export function guidePrompt(pr: PrRef, { info, mergeBase }: Checkout, triage: Tr
 The working directory is a checkout of the PR head; see the change with \`git diff ${mergeBase} HEAD\`.
 
 The reviewer is a senior engineer with many PRs to review and no context on this one: they don't know
-this code's internals. They first read a short briefing, then walk the changes with a "Next" button: each
-click scrolls GitHub's diff to the next step and shows your note for it in a small bar. Write for them.
+this code's internals. They first read a short briefing, then walk the places worth checking with a "Next"
+button: each click scrolls GitHub's diff to the next step and opens your note in a card right under
+its lines. Write for them.
 
 A deterministic pass already set aside the lines it proved need no review: code moved to another file
 unchanged, consistent renames, whitespace and generated files. Below are the ${listed.length} changes left,
@@ -159,7 +160,8 @@ The text, read in a small bar next to the code:
   confirm what you can check yourself, and never write a check that concludes all is well: leave it
   empty instead.
 - skim: true when the step is mechanical and safe to skim: wiring, imports, a test fake following the
-  real code, a docstring, a rename the deterministic pass missed.
+  real code, a docstring, a rename the deterministic pass missed. The walk skips these steps: the
+  reviewer only sees their note in the diff, so never mark skim a step where a mistake could hide.
 - outside_intent: true when the step does something neither its block's intent nor the PR description
   announces. AI-written code often slips these in.
 

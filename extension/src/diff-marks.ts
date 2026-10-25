@@ -65,12 +65,12 @@ export function setDocked(docked: boolean): void {
 
 const FILES_TAB = /\/pull\/\d+\/(files|changes)/;
 
-// Scrolls GitHub's diff to a line, in `path`. GitHub renders the diff of a file
-// only once it nears the viewport, so a line further down isn't in the page
-// yet: this brings its file into view first (opening the files tab when
-// needed), then waits for the line to render. Resolves false when the line
-// never shows up, such as in a file whose diff GitHub collapsed, and
-// "leaving" when it loads the files tab as a new page.
+// Scrolls GitHub's diff to a line, in `path`, and holds it just under the
+// sticky headers. A line further down may not be in the page yet: this brings
+// its file into view first (opening the files tab when needed), then waits for
+// the line to render. Resolves false when the line never shows up, such as in
+// a file whose diff GitHub collapsed, and "leaving" when it loads the files
+// tab as a new page.
 export async function scrollToLine(anchor: string, path: string, filesUrl: string): Promise<boolean | "leaving"> {
   let cell = findCell(anchor);
   if (!cell && !FILES_TAB.test(location.pathname)) {
@@ -90,14 +90,56 @@ export async function scrollToLine(anchor: string, path: string, filesUrl: strin
     cell = await waitFor(() => findCell(anchor), 5_000);
   }
   if (!cell) return false;
-  cell.scrollIntoView({ block: "center" });
-  // Rows above the line can still grow as they render: center it again once they settle.
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  findCell(anchor)?.scrollIntoView({ block: "center" });
+  await settle(anchor);
   return true;
 }
 
-function findCell(anchor: string): HTMLElement | null {
+// Lines of context kept visible above the target, in pixels.
+const CONTEXT_ABOVE = 56;
+
+// GitHub sizes the files it hasn't laid out yet from estimates
+// (`content-visibility: auto`), so a line moves as the files above it get
+// their real height. This scrolls it into place and corrects every frame until
+// it holds still, and stops as soon as the reader scrolls on their own.
+async function settle(anchor: string): Promise<void> {
+  let interrupted = false;
+  const stop = () => (interrupted = true);
+  const events = ["wheel", "touchstart", "mousedown"] as const;
+  for (const type of events) window.addEventListener(type, stop, { passive: true, once: true });
+  const deadline = performance.now() + 3000;
+  let still = 0;
+  try {
+    while (!interrupted && still < 6 && performance.now() < deadline) {
+      const cell = findCell(anchor);
+      if (!cell) return;
+      const delta = cell.getBoundingClientRect().top - (headerBottom(cell) + CONTEXT_ABOVE);
+      if (Math.abs(delta) > 2) {
+        window.scrollBy({ top: delta, behavior: "instant" });
+        still = 0;
+      } else {
+        still++;
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  } finally {
+    for (const type of events) window.removeEventListener(type, stop);
+  }
+}
+
+// Where the page's sticky headers end once `cell` is in view: the toolbar
+// stuck to the top of the page, then the header of the cell's own file.
+function headerBottom(cell: HTMLElement): number {
+  let bottom = 0;
+  for (const el of document.querySelectorAll<HTMLElement>("[class*='stickyHeader'], .pr-toolbar, .js-sticky")) {
+    const { position } = getComputedStyle(el);
+    if (position === "sticky" || position === "fixed") bottom = Math.max(bottom, el.offsetHeight);
+  }
+  const file = cell.closest("[id^='diff-']:not(td), .file");
+  const fileHeader = file?.querySelector<HTMLElement>("[data-diff-header-wrapper], .file-header");
+  return bottom + (fileHeader?.offsetHeight ?? 0);
+}
+
+export function findCell(anchor: string): HTMLElement | null {
   return document.querySelector(`td[data-line-anchor="${anchor}"], td[id="${anchor}"]`);
 }
 

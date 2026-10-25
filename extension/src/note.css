@@ -1,0 +1,93 @@
+/* A smart review note in GitHub's diff, under the lines it is about. It reads
+   like one of GitHub's review threads: the reader's eye is already on the code,
+   so the card stays plain and lets the code lead. */
+
+/* theme.css resets the host to inline; the card is a block in its row. */
+:host { display: block; font-size: 13px; }
+
+/* The current place: the note, what to verify, any concern, and the walk. */
+.card.open {
+  margin: 8px 16px 10px;
+  max-width: 760px;
+  padding: 10px 14px 10px;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--claude) 45%, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mark { display: inline-flex; }
+.mark .icon { width: 14px; height: 14px; }
+.position { color: var(--claude-text); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grow { flex: 1; min-width: 0; }
+.tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tag.focus { background: var(--claude-soft); color: var(--claude-text); }
+button.ghost { border-color: transparent; background: none; color: var(--fg-muted); padding: 2px 8px; font-size: 12px; gap: 4px; }
+button.ghost:hover { background: var(--bg-muted); color: var(--fg); }
+button.ghost .icon { width: 12px; height: 12px; color: var(--claude); }
+
+p { margin: 0; line-height: 1.5; }
+.intent { color: var(--fg-muted); font-size: 12px; }
+.note { max-width: 75ch; }
+.line { display: flex; gap: 10px; align-items: baseline; max-width: 80ch; }
+.label {
+  flex-shrink: 0;
+  width: 64px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.label .icon { width: 12px; height: 12px; align-self: center; }
+.verify .label { color: var(--claude-text); }
+.concern .label { color: var(--danger); }
+.related { font-size: 12px; color: var(--fg-muted); }
+button.link { display: inline; border: 0; background: none; padding: 0; font-size: 12px; font-weight: 400; color: var(--accent); }
+button.link:hover { background: none; text-decoration: underline; }
+code { font: 12px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg-muted); }
+
+footer { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+footer .hint { font-size: 11px; color: var(--fg-muted); }
+footer button { padding: 3px 12px; font-size: 12px; }
+footer button.primary { padding: 3px 8px 3px 12px; gap: 2px; }
+footer button .icon { width: 14px; height: 14px; }
+
+/* Another place worth checking: one line that opens its card. */
+.card.closed {
+  margin: 4px 16px;
+  max-width: 760px;
+  width: calc(100% - 32px);
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px dashed color-mix(in srgb, var(--claude) 40%, var(--border));
+  border-radius: 8px;
+  background: var(--bg);
+  font-weight: 400;
+  text-align: left;
+}
+.card.closed:hover { background: var(--claude-soft); }
+.card.closed.walked { border-style: solid; border-color: var(--border-muted); }
+.card.closed.walked .card-title, .card.closed.walked .position { color: var(--fg-muted); }
+.summary-line { color: var(--fg-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card.closed > .icon { color: var(--danger); width: 14px; height: 14px; }
+
+/* A mechanical step: a quiet line, no stop on the walk. */
+.skim { margin: 2px 16px 4px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+.skim .mark { opacity: 0.6; }
+.skim-label { font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }

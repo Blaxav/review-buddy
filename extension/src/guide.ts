@@ -15,20 +15,26 @@ import {
   type Triage,
 } from "../../shared/protocol";
 import { lineAnchor, scrollToLine, setMarks } from "./diff-marks";
+import { focusInNote, setNotes, type DiffNote } from "./diff-notes";
 import css from "./guide.css" with { type: "text" };
 import { icon, type IconName } from "./icons";
 import { GUIDE_PORT } from "./messages";
+import noteCss from "./note.css" with { type: "text" };
+import theme from "./theme.css" with { type: "text" };
 import { h } from "./ui";
 
-// The smart review: a small bar at the bottom of the page that first briefs
-// the reviewer on what the PR changes and where to read closely, then walks
-// them through it in Claude's reading order, one click per step, while
-// GitHub's diff dims the lines the helper proved need no review.
+// The smart review extends a manual review of GitHub's diff. Claude's notes
+// sit in the diff itself, in a card under the lines they are about, and the
+// walk goes from one place worth checking to the next: Next scrolls the diff
+// there and opens its card. Mechanical steps get a one-line note in the diff
+// and no stop. A small bar keeps the walk in reach while the reader scrolls,
+// and opens an overview of the whole PR.
 
 export const guideCss = css;
 
-// One step on the walk, with its block, and the change the diff scrolls to.
-type Stop = { block: ReviewBlock; blockIndex: number; step: ReviewStep; stepIndex: number; anchor: Change };
+// A place worth checking: a step that isn't mechanical, or that the briefing
+// asks to read closely. `anchor` is the change its note is about.
+type Stop = { block: ReviewBlock; step: ReviewStep; anchor: Change; focus?: FocusPoint; firstOfBlock: boolean };
 
 type Guide = {
   pr: PrRef;
@@ -41,11 +47,9 @@ type Guide = {
   // The stop shown: -1 before the first, stops.length once past the last.
   at: number;
   furthest: number;
-  outline: boolean;
-  // Set when the current change couldn't be found in the page.
+  overview: boolean;
+  // Set when the current place couldn't be found in the page.
   lost?: string;
-  // The change of the current step the diff shows, when not its anchor.
-  shown?: string;
   port: Browser.Runtime.Port | null;
 };
 
@@ -56,6 +60,8 @@ const KINDS: { kind: ProvenKind; label: string }[] = [
   { kind: "generated", label: "generated" },
 ];
 
+const NOTE_CSS = theme + noteCss;
+
 const guides = new Map<string, Guide>();
 let guide: Guide | null = null;
 let dim = true;
@@ -65,7 +71,7 @@ export const guideStarter = h(
   "button",
   {
     className: "starter",
-    title: "Walk through this PR's changes, skipping moved and renamed code",
+    title: "Find the places in this PR worth checking, and walk them in the diff",
     hidden: true,
     onclick: () => guide && start(guide, false),
   },
@@ -75,7 +81,7 @@ export const guideStarter = h(
 export const guideBar = h("div", { className: "review-bar", hidden: true });
 guideBar.setAttribute("role", "region");
 guideBar.setAttribute("aria-label", "Smart review");
-// Announces each step to screen readers; it outlives the bar's rebuilds.
+// Announces each stop to screen readers; it outlives the bar's rebuilds.
 export const guideLive = h("div", { className: "visually-hidden" });
 guideLive.setAttribute("aria-live", "polite");
 
@@ -85,7 +91,7 @@ export function initGuide(ask: (question: string, label: string) => void): void 
   document.addEventListener("keydown", onKey, true);
 }
 
-// ] and [ walk the steps, Escape closes the outline. Keys typed into a field
+// ] and [ walk the places, Escape closes the overview. Keys typed into a field
 // are left alone, and so are GitHub's own shortcuts, which use other keys.
 function onKey(event: KeyboardEvent): void {
   const g = guide;
@@ -93,10 +99,8 @@ function onKey(event: KeyboardEvent): void {
   if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event)) return;
   if (event.key === "]" && g.at < g.stops.length) go(g, g.at + 1);
   else if (event.key === "[" && g.at > 0) go(g, g.at - 1);
-  else if (event.key === "Escape" && g.outline) {
-    g.outline = false;
-    render();
-  } else return;
+  else if (event.key === "Escape" && g.overview) setOverview(g, false);
+  else return;
   event.preventDefault();
   event.stopPropagation();
 }
@@ -117,16 +121,14 @@ export function setGuidePr(pr: PrRef | null): void {
   if (!pr) {
     guide = null;
     render();
-    updateMarks();
     return;
   }
   const key = prKey(pr);
   if (guide && prKey(guide.pr) === key) return;
   const existing = guides.get(key);
-  guide = existing ?? { pr, phase: "idle", stops: [], at: -1, furthest: -1, outline: false, port: null };
+  guide = existing ?? { pr, phase: "idle", stops: [], at: -1, furthest: -1, overview: false, port: null };
   guides.set(key, guide);
   render();
-  updateMarks();
   if (!existing) {
     const current = guide;
     void load(startedKey(pr)).then((started) => {
@@ -146,7 +148,7 @@ function start(target: Guide, regroup: boolean): void {
     stops: [],
     at: -1,
     furthest: -1,
-    outline: false,
+    overview: false,
   });
   void save(startedKey(target.pr), true);
   const port = browser.runtime.connect({ name: GUIDE_PORT });
@@ -161,12 +163,9 @@ function start(target: Guide, regroup: boolean): void {
 
 function end(target: Guide): void {
   target.port?.disconnect();
-  Object.assign(target, { phase: "idle", port: null, triage: undefined, review: undefined, stops: [], at: -1, furthest: -1, outline: false });
+  Object.assign(target, { phase: "idle", port: null, triage: undefined, review: undefined, stops: [], at: -1, furthest: -1, overview: false });
   void save(startedKey(target.pr), false);
-  if (target === guide) {
-    render();
-    updateMarks();
-  }
+  if (target === guide) render();
 }
 
 function onEvent(target: Guide, event: GuideEvent): void {
@@ -182,16 +181,17 @@ function onEvent(target: Guide, event: GuideEvent): void {
       break;
     case "guide":
       target.review = event.guide;
-      target.stops = walk(event.guide.blocks, target.triage!);
+      target.stops = walk(event.guide, target.triage!);
       target.phase = "done";
       finish(target);
       void load(progressKey(target)).then((saved) => {
         const { at, furthest } = (saved ?? {}) as { at?: number; furthest?: number };
         if (typeof at === "number") target.at = Math.min(at, target.stops.length);
         if (typeof furthest === "number") target.furthest = Math.min(furthest, target.stops.length);
+        // A first look opens on the briefing.
+        target.overview = target.at < 0;
         if (target !== guide) return;
         render();
-        updateMarks();
         const stop = target.stops[target.at];
         if (stop && takePendingJump(target)) void goTo(target, stop.anchor);
       });
@@ -202,10 +202,7 @@ function onEvent(target: Guide, event: GuideEvent): void {
       finish(target);
       break;
   }
-  if (target === guide) {
-    render();
-    if (event.type === "triage" || event.type === "guide") updateMarks();
-  }
+  if (target === guide) render();
 }
 
 function finish(target: Guide): void {
@@ -214,241 +211,165 @@ function finish(target: Guide): void {
   target.port = null;
 }
 
-function walk(blocks: ReviewBlock[], triage: Triage): Stop[] {
+function walk(review: ReviewGuide, triage: Triage): Stop[] {
   const changes = new Map(triage.changes.map((change) => [change.id, change]));
-  return blocks.flatMap((block, blockIndex) =>
-    block.steps.flatMap((step, stepIndex) => {
-      const anchor = changes.get(step.anchor) ?? changes.get(step.changes[0]!);
-      return anchor ? [{ block, blockIndex, step, stepIndex, anchor }] : [];
-    }),
-  );
+  return review.blocks.flatMap((block) => {
+    let first = true;
+    return block.steps.flatMap((step) => {
+      const anchor = changes.get(step.anchor);
+      const focus = review.focus.find((point) => step.changes.includes(point.change));
+      if (!anchor || (step.skim && !focus)) return [];
+      const stop = { block, step, anchor, focus, firstOfBlock: first };
+      first = false;
+      return [stop];
+    });
+  });
+}
+
+function render(): void {
+  renderBar();
+  renderNotes();
+  updateMarks();
 }
 
 // --- The bar ------------------------------------------------------------------
 
-function render(): void {
+function renderBar(): void {
   const g = guide;
   guideStarter.hidden = !g || g.phase !== "idle";
   guideBar.hidden = !g || g.phase === "idle";
   if (!g || g.phase === "idle") return guideBar.replaceChildren();
 
-  // Rebuilding the bar drops the focused button: put focus back on its successor.
-  const focused = (guideBar.getRootNode() as ShadowRoot).activeElement;
-  const refocus = focused instanceof HTMLElement && guideBar.contains(focused) ? focused.dataset.key : undefined;
-
   const close = iconButton("close", "End the smart review", () => end(g));
-  let rows: HTMLElement[];
+  let row: HTMLElement;
   if (g.phase === "running") {
-    rows = [
-      row(
-        mark(),
-        h("div", { className: "grow" }, h("div", { className: "title", textContent: headline(g) }), h("div", { className: "status", textContent: g.status ?? "Working…" })),
-        close,
-      ),
-    ];
-  } else if (g.phase === "error") {
-    rows = [
-      row(
-        mark(),
-        h("div", { className: "grow" }, h("div", { className: "title", textContent: "Smart review failed" }), h("div", { className: "error", textContent: g.error ?? "" })),
-        h("button", { textContent: "Try again", onclick: () => start(g, false) }),
-        close,
-      ),
-    ];
-  } else if (g.stops.length === 0) {
-    rows = [row(mark(), h("div", { className: "grow title", textContent: "Nothing to read: every changed line is proven." }), outlineButton(g), close)];
-  } else if (g.at < 0) {
-    const steps = g.stops.length;
-    const read = g.triage!.changes.reduce((n, c) => n + linesToRead(c), 0);
-    rows = [
-      row(
-        mark(),
-        h(
-          "div",
-          { className: "grow title" },
-          "Smart review",
-          h("span", { className: "muted", textContent: ` · ${steps} step${steps === 1 ? "" : "s"}, ${fmt(read)} line${read === 1 ? "" : "s"} to read` }),
-        ),
-        close,
-      ),
-      ...renderBriefing(g),
-      controls(h("span", { className: "grow" }), outlineButton(g), nextButton(g, "Start", "Start the walk")),
-    ];
-  } else if (g.at >= g.stops.length) {
-    rows = [
-      row(
-        h("span", { className: "done-mark" }, icon("check")),
-        h("div", { className: "grow title", textContent: `Walked all ${g.stops.length} steps` }),
-        close,
-      ),
-      ...renderBriefing(g, false),
-      controls(
-        h("span", { className: "grow" }),
-        outlineButton(g),
-        backButton(g),
-        h("button", { textContent: "From the start", onclick: () => go(g, 0) }),
-      ),
-    ];
-  } else {
-    rows = renderStop(g, g.stops[g.at]!, close);
-  }
-  guideBar.replaceChildren(...rows);
-  if (g.outline) guideBar.prepend(renderOutline(g));
-  if (refocus) guideBar.querySelector<HTMLElement>(`[data-key="${refocus}"]`)?.focus();
-}
-
-// The bar's last row: its buttons keep their place from one step to the next.
-function controls(...children: (Node | string)[]): HTMLElement {
-  return h("div", { className: "row controls" }, ...children);
-}
-
-function nextButton(g: Guide, label: string, title: string): HTMLButtonElement {
-  const button = h("button", { className: "primary next", title: `${title} (])`, onclick: () => go(g, g.at + 1) }, label, icon("chevron"));
-  button.dataset.key = "next";
-  return button;
-}
-
-function backButton(g: Guide): HTMLButtonElement {
-  const button = iconButton("back", "Previous step ([)", () => go(g, g.at - 1), g.at === 0);
-  button.dataset.key = "back";
-  return button;
-}
-
-function renderStop(g: Guide, stop: Stop, close: HTMLElement): HTMLElement[] {
-  const { block, step, stepIndex } = stop;
-  const blocks = g.review!.blocks.length;
-  const rows = [
-    row(
-      h(
-        "div",
-        { className: "grow title" },
-        block.title,
-        blocks > 1 ? h("span", { className: "muted", textContent: ` · block ${stop.blockIndex + 1} of ${blocks}` }) : "",
-      ),
+    row = h(
+      "div",
+      { className: "row" },
+      mark(),
+      h("div", { className: "grow" }, h("div", { className: "title", textContent: headline(g) }), h("div", { className: "status", textContent: g.status ?? "Working…" })),
       close,
-    ),
-  ];
-  // Entering a block, its intent says what the steps add up to.
-  if (stepIndex === 0 && block.intent) rows.push(row(h("span", { className: "grow intent" }, ...prose(block.intent))));
-
-  // The anchor first: the walk lands there, and the rest follow in order.
-  const changes = [stop.anchor, ...step.changes.filter((id) => id !== stop.anchor.id).map((id) => g.triage!.changes.find((change) => change.id === id)!)];
-  const shown = changes.find((change) => change.id === g.shown) ?? stop.anchor;
-  const focus = g.review!.focus.find((point) => step.changes.includes(point.change));
-  const meta = row(
-    h("button", { className: "where", title: `${location(shown)} · show it again`, onclick: () => void goTo(g, shown) }, shortLocation(shown)),
-  );
-  if (changes.length > 1) {
-    const at = changes.indexOf(shown);
-    const following = changes[(at + 1) % changes.length]!;
-    const more = h(
-      "button",
-      {
-        className: "more",
-        title: `Show ${location(following)}`,
-        onclick: () => {
-          g.shown = following.id;
-          render();
-          void goTo(g, following);
-        },
-      },
-      `${at + 1} of ${changes.length} changes`,
-      icon("chevron"),
     );
-    more.dataset.key = "more";
-    meta.append(more);
+  } else if (g.phase === "error") {
+    row = h(
+      "div",
+      { className: "row" },
+      mark(),
+      h("div", { className: "grow" }, h("div", { className: "title", textContent: "Smart review failed" }), h("div", { className: "error", textContent: g.error ?? "" })),
+      h("button", { textContent: "Try again", onclick: () => start(g, false) }),
+      close,
+    );
+  } else {
+    row = h("div", { className: "row" }, mark(), h("div", { className: "grow title" }, ...barTitle(g)), overviewButton(g), ...walkButtons(g), close);
   }
-  if (focus) meta.append(h("span", { className: "tag focus", title: "One of the places the briefing asks you to read closely", textContent: "Read closely" }));
-  else if (step.skim) meta.append(h("span", { className: "tag skim", title: "Mechanical: wiring, imports, fakes or docs", textContent: "Skim" }));
-  if (step.outsideIntent) {
-    meta.append(h("span", { className: "tag", title: "Neither the block's intent nor the PR description announces this change", textContent: "Not in the PR description" }));
-  }
-  rows.push(meta);
-  if (step.note) rows.push(row(h("p", { className: "grow note" }, ...prose(step.note))));
-  if (focus) rows.push(row(h("span", { className: "label verify-label", textContent: "Verify" }), h("span", { className: "grow verify" }, ...prose(focus.why))));
-  if (step.check) rows.push(row(h("span", { className: "label check-label" }, icon("warning"), "Concern"), h("span", { className: "grow check" }, ...prose(step.check))));
-  if (g.lost) rows.push(row(h("span", { className: "grow error", textContent: g.lost })));
-  rows.push(
-    controls(
-      h("span", { className: "grow progress", textContent: `Step ${g.at + 1} of ${g.stops.length}` }),
-      iconButton("sparkle", "Ask Claude about this step", () => askAbout(g, stop)),
-      outlineButton(g),
-      backButton(g),
-      nextButton(g, g.at === g.stops.length - 1 ? "Finish" : "Next", g.at === g.stops.length - 1 ? "Finish the walk" : "Next step"),
-    ),
-  );
-  return rows;
+  const rows: HTMLElement[] = [row];
+  if (g.lost) rows.push(h("div", { className: "row error", textContent: g.lost }));
+  guideBar.replaceChildren(...rows);
+  if (g.overview && g.phase === "done") guideBar.prepend(renderOverview(g));
 }
 
-// What the reviewer reads before the walk: what the PR changes, and the
-// places to read closely, each a link to its step.
-function renderBriefing(g: Guide, withSummary = true): HTMLElement[] {
-  const { summary, focus } = g.review!;
-  const items: HTMLElement[] = [];
-  if (summary && withSummary) items.push(h("p", { className: "summary-text" }, ...prose(summary)));
-  const points = focus.flatMap((point) => focusItem(g, point));
-  if (points.length > 0) items.push(h("div", { className: "focus-list" }, h("div", { className: "focus-head", textContent: "Read closely" }), ...points));
-  return items;
+function barTitle(g: Guide): (Node | string)[] {
+  const total = g.stops.length;
+  if (total === 0) return ["Nothing stands out", muted(" · the notes in the diff cover the rest")];
+  if (g.at < 0) return ["Smart review", muted(` · ${total} place${total === 1 ? "" : "s"} worth checking`)];
+  if (g.at >= total) return ["Checked all places", muted(` · ${total} of ${total}`)];
+  const stop = g.stops[g.at]!;
+  return [h("span", { className: "position", textContent: `${g.at + 1} of ${total}` }), " ", stop.block.title];
 }
 
-function focusItem(g: Guide, point: FocusPoint): HTMLElement[] {
-  const at = g.stops.findIndex((stop) => stop.step.changes.includes(point.change));
-  const change = g.triage!.changes.find((c) => c.id === point.change);
-  if (at < 0 || !change) return [];
-  return [
+function walkButtons(g: Guide): HTMLElement[] {
+  const total = g.stops.length;
+  if (total === 0) return [];
+  if (g.at < 0) return [h("button", { className: "primary next", title: "Go to the first place (])", onclick: () => go(g, 0) }, "Start", icon("chevron"))];
+  const back = iconButton("back", "Previous place ([)", () => go(g, g.at - 1), g.at === 0);
+  if (g.at >= total) return [back, h("button", { textContent: "From the start", onclick: () => go(g, 0) })];
+  return [back, h("button", { className: "primary next", title: "Next place (])", onclick: () => go(g, g.at + 1) }, g.at === total - 1 ? "Finish" : "Next", icon("chevron"))];
+}
+
+function overviewButton(g: Guide): HTMLButtonElement {
+  const button = iconButton("list", g.overview ? "Hide the overview" : "Overview: what the PR changes, and every place worth checking", () => setOverview(g, !g.overview));
+  button.classList.toggle("active", g.overview);
+  return button;
+}
+
+function setOverview(g: Guide, open: boolean): void {
+  g.overview = open;
+  renderBar();
+}
+
+// --- The overview -----------------------------------------------------------------
+
+function renderOverview(g: Guide): HTMLElement {
+  const review = g.review!;
+  const overview = h("div", { className: "overview" });
+  if (review.summary) overview.append(h("p", { className: "summary-text" }, ...prose(review.summary)));
+  if (g.stops.length > 0) {
+    overview.append(
+      h("div", { className: "section-head", textContent: "Worth checking" }),
+      h(
+        "ol",
+        { className: "places" },
+        ...g.stops.map((stop, i) =>
+          h(
+            "li",
+            {},
+            h(
+              "button",
+              {
+                className: `place${i === g.at ? " current" : ""}${i < g.furthest && i !== g.at ? " walked" : ""}`,
+                onclick: () => go(g, i),
+              },
+              h("span", { className: "num" }, i < g.furthest && i !== g.at ? icon("check") : String(i + 1)),
+              h(
+                "span",
+                { className: "grow" },
+                h("span", { className: "place-title" }, stop.block.title, stop.focus ? h("span", { className: "tag focus", textContent: "Look closely" }) : ""),
+                h("small", {}, ...prose(stop.focus?.why || stop.step.note || stop.block.intent)),
+              ),
+              stop.step.check ? h("span", { className: "concern-mark", title: "Claude found a concern here" }, icon("warning")) : "",
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  const skims = skimSteps(g);
+  if (skims.length > 0) {
+    overview.append(
+      h(
+        "details",
+        { className: "skims" },
+        h("summary", {}, icon("chevron"), `Also changed, safe to skim (${skims.length})`),
+        h(
+          "ul",
+          {},
+          ...skims.map(({ step, anchor }) =>
+            h("li", {}, h("button", { className: "skim-link", onclick: () => void jump(g, anchor) }, ...prose(step.note || "Mechanical change"))),
+          ),
+        ),
+      ),
+    );
+  }
+  overview.append(renderSummary(g.triage!), renderProof(g.triage!));
+  overview.append(
     h(
       "button",
-      {
-        className: "focus-item",
-        title: `Go to ${location(change)}`,
-        onclick: () => {
-          g.outline = false;
-          go(g, at, change);
-        },
-      },
-      h("span", { className: "where", textContent: shortLocation(change) }),
-      h("span", { className: "grow why" }, ...prose(point.why)),
+      { className: "regroup", title: "Ask Claude to look at the PR again", onclick: () => start(g, true) },
+      icon("refresh"),
+      "Review again",
     ),
-  ];
+  );
+  return overview;
 }
 
-function renderOutline(g: Guide): HTMLElement {
-  const outline = h("div", { className: "outline" });
-  // Before the walk, the bar itself shows the briefing.
-  if (g.review && g.at >= 0) outline.append(...renderBriefing(g));
-  if (g.triage) outline.append(renderSummary(g.triage));
-  if (g.review && g.review.blocks.length > 0) {
-    const current = g.stops[g.at]?.block;
-    const changes = new Map(g.triage!.changes.map((change) => [change.id, change]));
-    outline.append(
-      h(
-        "div",
-        { className: "outline-head" },
-        h("span", { textContent: "Blocks" }),
-        h("button", { className: "icon-button", title: "Ask Claude to group the changes again", ariaLabel: "Regroup", onclick: () => start(g, true) }, icon("refresh")),
-      ),
-      ...g.review.blocks.map((block, i) => {
-        const indexes = g.stops.flatMap((s, at) => (s.block === block ? [at] : []));
-        const walked = indexes.length > 0 && indexes[indexes.length - 1]! < g.furthest;
-        const lines = block.steps.reduce((n, step) => n + step.changes.reduce((m, id) => m + linesToRead(changes.get(id)!), 0), 0);
-        return h(
-          "button",
-          {
-            className: `outline-block${block === current ? " current" : ""}${walked ? " walked" : ""}`,
-            onclick: () => {
-              g.outline = false;
-              go(g, indexes[0] ?? 0);
-            },
-          },
-          h("span", { className: "num" }, walked ? icon("check") : String(i + 1)),
-          h("span", { className: "grow" }, h("span", { className: "block-title", textContent: block.title }), h("small", {}, ...prose(block.intent))),
-          h("span", { className: "muted", textContent: `${lines} line${lines === 1 ? "" : "s"}` }),
-        );
-      }),
-    );
-  }
-  if (g.triage) outline.append(renderProof(g.triage));
-  return outline;
+function skimSteps(g: Guide): { step: ReviewStep; anchor: Change }[] {
+  const walked = new Set(g.stops.map((stop) => stop.step));
+  return g.review!.blocks.flatMap((block) =>
+    block.steps.flatMap((step) => {
+      const anchor = g.triage!.changes.find((change) => change.id === step.anchor);
+      return walked.has(step) || !anchor ? [] : [{ step, anchor }];
+    }),
+  );
 }
 
 function renderSummary(triage: Triage): HTMLElement {
@@ -464,10 +385,10 @@ function renderSummary(triage: Triage): HTMLElement {
     return el;
   };
   const bar = h("div", { className: "bar" }, segment("review", review));
-  const legend = h("div", { className: "legend" }, legendItem("review", `${fmt(review)} to read`));
+  const legend = h("div", { className: "legend" }, legendItem("review", `${fmt(review)} lines to read`));
   if (imports > 0) {
     bar.append(segment("imports", imports));
-    legend.append(legendItem("imports", `${fmt(imports)} in imports, read with their step`));
+    legend.append(legendItem("imports", `${fmt(imports)} in imports`));
   }
   for (const { kind, label } of KINDS) {
     const n = counts.get(kind) ?? 0;
@@ -480,7 +401,7 @@ function renderSummary(triage: Triage): HTMLElement {
     dim = toggle.checked;
     updateMarks();
   };
-  return h("div", { className: "summary" }, bar, legend, h("label", { className: "toggle" }, toggle, "Dim the proven lines in the diff"));
+  return h("div", { className: "summary" }, bar, legend, h("label", { className: "toggle" }, toggle, "Dim the lines proven to need no review"));
 }
 
 function legendItem(kind: string, text: string): HTMLElement {
@@ -520,30 +441,128 @@ function renderProof(triage: Triage): HTMLElement {
   return h("details", { className: "proof" }, h("summary", {}, icon("chevron"), "What was set aside, and why"), ...items);
 }
 
+// --- Notes in the diff ------------------------------------------------------------
+
+// Every step gets a note under its lines: the current place opens in a card,
+// the other places show one line to open them, and mechanical steps a quiet
+// line saying so.
+function renderNotes(): void {
+  const g = guide;
+  if (!g || g.phase !== "done") return setNotes([], NOTE_CSS);
+  const notes: DiffNote[] = [];
+  g.stops.forEach((stop, i) => {
+    notes.push({ key: stop.anchor.id, after: lastLine(stop.anchor), content: i === g.at ? openCard(g, stop, i) : closedCard(g, stop, i) });
+  });
+  for (const { step, anchor } of skimSteps(g)) {
+    notes.push({
+      key: anchor.id,
+      after: lastLine(anchor),
+      content: h("div", { className: "skim" }, mark(), h("span", { className: "skim-label", textContent: "Skim" }), h("span", {}, ...prose(step.note || "Mechanical change"))),
+    });
+  }
+  setNotes(notes, NOTE_CSS);
+}
+
+function openCard(g: Guide, stop: Stop, i: number): HTMLElement {
+  const { block, step, focus } = stop;
+  const total = g.stops.length;
+  const card = h(
+    "section",
+    { className: "card open" },
+    h(
+      "header",
+      {},
+      mark(),
+      h("span", { className: "position", textContent: `${i + 1} of ${total}` }),
+      h("span", { className: "grow card-title", textContent: block.title }),
+      focus ? h("span", { className: "tag focus", textContent: "Look closely" }) : "",
+      step.outsideIntent ? h("span", { className: "tag", title: "Neither its block nor the PR description announces this change", textContent: "Not in the PR description" }) : "",
+      h("button", { className: "ghost", title: "Ask Claude about these lines", onclick: () => askAbout(g, stop) }, icon("sparkle"), "Ask Claude"),
+    ),
+  );
+  card.setAttribute("aria-label", `Smart review, place ${i + 1} of ${total}: ${block.title}`);
+  if (stop.firstOfBlock && block.intent) card.append(h("p", { className: "intent" }, ...prose(block.intent)));
+  if (step.note) card.append(h("p", { className: "note" }, ...prose(step.note)));
+  if (focus) card.append(line("verify", "Verify", focus.why));
+  if (step.check) card.append(line("concern", "Concern", step.check, "warning"));
+  // The step's other changes: those in this file carry the same bar in the
+  // diff, so they are counted; those in other files get a link.
+  const others = step.changes
+    .filter((id) => id !== stop.anchor.id)
+    .map((id) => g.triage!.changes.find((change) => change.id === id)!)
+    .filter((change) => !change.importsOnly);
+  const here = others.filter((change) => change.path === stop.anchor.path).length;
+  const elsewhere = [...new Map(others.filter((change) => change.path !== stop.anchor.path).map((change) => [change.path, change])).values()];
+  if (here + elsewhere.length > 0) {
+    const parts: (Node | string)[] = [];
+    if (here > 0) parts.push(`${here} more change${here === 1 ? "" : "s"} in this file, marked in the margin`);
+    if (elsewhere.length > 0) {
+      parts.push(here > 0 ? "; also " : "Also ");
+      elsewhere.forEach((change, k) => {
+        if (k > 0) parts.push(", ");
+        parts.push(h("button", { className: "link", title: `Show ${change.path}`, onclick: () => void jump(g, change) }, basename(change.path)));
+      });
+    }
+    card.append(h("p", { className: "related" }, ...parts, "."));
+  }
+  const back = h("button", { textContent: "Previous", disabled: i === 0, onclick: () => go(g, i - 1, true) });
+  const next = h("button", { className: "primary", onclick: () => go(g, i + 1, true) }, i === total - 1 ? "Finish" : "Next", icon("chevron"));
+  next.dataset.key = "next";
+  back.dataset.key = "back";
+  card.append(h("footer", {}, h("span", { className: "grow hint", textContent: "] next · [ previous" }), back, next));
+  return card;
+}
+
+function closedCard(g: Guide, stop: Stop, i: number): HTMLElement {
+  return h(
+    "button",
+    { className: `card closed${i < g.furthest ? " walked" : ""}`, title: "Open this place", onclick: () => go(g, i, false, false) },
+    mark(),
+    h("span", { className: "position", textContent: `${i + 1} of ${g.stops.length}` }),
+    h("span", { className: "card-title", textContent: stop.block.title }),
+    h("span", { className: "grow summary-line" }, ...prose(stop.step.note)),
+    stop.step.check ? icon("warning") : "",
+  );
+}
+
+function line(kind: string, label: string, text: string, iconName?: IconName): HTMLElement {
+  return h("p", { className: `line ${kind}` }, h("span", { className: "label" }, iconName ? icon(iconName) : "", label), h("span", {}, ...prose(text)));
+}
+
+// The line a change's note goes under: its last added line, or its last removed one.
+function lastLine(change: Change): string {
+  return change.newCount > 0
+    ? lineAnchor(change.fileHash, "RIGHT", change.newStart + change.newCount - 1)
+    : lineAnchor(change.fileHash, "LEFT", change.oldStart + change.oldCount - 1);
+}
+
+// "store.py, lines 375–381": where a change is, in words.
+function linesLabel(change: Change): string {
+  const [start, count] = change.newCount > 0 ? [change.newStart, change.newCount] : [change.oldStart, change.oldCount];
+  return count > 1 ? `${basename(change.path)}, lines ${start}–${start + count - 1}` : `${basename(change.path)}, line ${start}`;
+}
+
+function basename(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+// --- Shared parts -------------------------------------------------------------------
+
 // Claude's text, with its `code` spans set in code.
 function prose(text: string): (Node | string)[] {
   return text.split(/`([^`]+)`/).map((part, i) => (i % 2 === 1 ? h("code", { textContent: part }) : part));
-}
-
-function row(...children: (Node | string)[]): HTMLElement {
-  return h("div", { className: "row" }, ...children);
 }
 
 function mark(): HTMLElement {
   return h("span", { className: "mark" }, icon("sparkle"));
 }
 
-function iconButton(name: IconName, label: string, onclick: () => void, disabled = false): HTMLButtonElement {
-  return h("button", { className: "icon-button", title: label, ariaLabel: label, disabled, onclick }, icon(name));
+function muted(text: string): HTMLElement {
+  return h("span", { className: "muted", textContent: text });
 }
 
-function outlineButton(g: Guide): HTMLButtonElement {
-  const button = iconButton("list", g.outline ? "Hide the outline" : "Outline: the blocks, and what was set aside", () => {
-    g.outline = !g.outline;
-    render();
-  });
-  button.classList.toggle("active", g.outline);
-  return button;
+function iconButton(name: IconName, label: string, onclick: () => void, disabled = false): HTMLButtonElement {
+  return h("button", { className: "icon-button", title: label, ariaLabel: label, disabled, onclick }, icon(name));
 }
 
 function headline(g: Guide): string {
@@ -553,42 +572,29 @@ function headline(g: Guide): string {
   return `${fmt(read)} of ${fmt(total)} changed lines to read`;
 }
 
-// "12–18" on the head side, or the removed lines when nothing was added.
-function changeLines(change: Change): string {
-  const [start, count, suffix] = change.newCount > 0 ? [change.newStart, change.newCount, ""] : [change.oldStart, change.oldCount, " (removed)"];
-  return (count > 1 ? `${start}–${start + count - 1}` : `${start}`) + suffix;
-}
-
-// "store.py:321–381", what a location chip shows.
-function shortLocation(change: Change): string {
-  return `${basename(change.path)}:${changeLines(change)}`;
-}
-
-function location(change: Change): string {
-  return `${change.path}:${changeLines(change)}`;
-}
-
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
 // --- Actions ------------------------------------------------------------------
 
-// `change` is where to scroll, when not the step's anchor.
-function go(g: Guide, at: number, change?: Change): void {
+// Opens place `at` and, unless `scroll` is false, scrolls the diff to it.
+// `fromCard` moves focus to the new card, for a reader walking from the keyboard.
+function go(g: Guide, at: number, fromCard = false, scroll = true): void {
   g.at = Math.max(0, Math.min(at, g.stops.length));
   g.lost = undefined;
-  g.shown = change?.id;
-  g.outline = false;
+  g.overview = false;
   g.furthest = Math.max(g.furthest, g.at);
   void save(progressKey(g), { at: g.at, furthest: g.furthest });
   render();
-  updateMarks();
   const stop = g.stops[g.at];
-  guideLive.textContent = stop
-    ? `Step ${g.at + 1} of ${g.stops.length}: ${stop.block.title}, ${location(change ?? stop.anchor)}`
-    : `Walked all ${g.stops.length} steps`;
-  if (stop) void goTo(g, change ?? stop.anchor);
+  guideLive.textContent = stop ? `Place ${g.at + 1} of ${g.stops.length}: ${stop.block.title}` : `Checked all ${g.stops.length} places`;
+  if (!stop) return;
+  if (fromCard) focusInNote(stop.anchor.id, "[data-key='next']");
+  if (scroll) void goTo(g, stop.anchor);
+}
+
+// Scrolls to a change without moving the walk.
+async function jump(g: Guide, change: Change): Promise<void> {
+  g.overview = false;
+  renderBar();
+  await goTo(g, change);
 }
 
 async function goTo(g: Guide, change: Change): Promise<void> {
@@ -598,39 +604,44 @@ async function goTo(g: Guide, change: Change): Promise<void> {
     }
     return count > 0 ? start : undefined;
   };
-  const right = firstToRead("RIGHT", change.newStart, change.newCount);
+  // The removed lines first: the unified view shows them above the added ones,
+  // and the split view on the same rows.
+  const left = firstToRead("LEFT", change.oldStart, change.oldCount);
   const anchor =
-    right !== undefined
-      ? lineAnchor(change.fileHash, "RIGHT", right)
-      : lineAnchor(change.fileHash, "LEFT", firstToRead("LEFT", change.oldStart, change.oldCount) ?? change.oldStart);
-  const lost = g.lost;
-  g.lost = undefined;
-  if (lost) render();
+    left !== undefined
+      ? lineAnchor(change.fileHash, "LEFT", left)
+      : lineAnchor(change.fileHash, "RIGHT", firstToRead("RIGHT", change.newStart, change.newCount) ?? change.newStart);
+  if (g.lost) {
+    g.lost = undefined;
+    renderBar();
+  }
   // Reaching the files tab can load a new page, which ends this script: the
   // next one finishes the jump.
   setPendingJump(g);
   const found = await scrollToLine(anchor, change.path, `/${g.pr.owner}/${g.pr.repo}/pull/${g.pr.number}/files`);
   if (found === "leaving") return;
   takePendingJump(g);
-  if (found || !g.stops[g.at]?.step.changes.includes(change.id)) return;
-  g.lost = `Couldn't find ${shortLocation(change)} in the page. If GitHub collapsed the file, expand it, then click the location.`;
-  if (g === guide) render();
+  if (found) return;
+  g.lost = `${linesLabel(change)} isn't in the page: GitHub may have collapsed ${change.path}. Expand it, then press Next again.`;
+  if (g === guide) renderBar();
 }
 
 function askAbout(g: Guide, stop: Stop): void {
-  const changes = new Map(g.triage!.changes.map((change) => [change.id, change]));
-  const where = stop.step.changes.map((id) => location(changes.get(id)!)).join(", ");
+  const where = stop.step.changes
+    .map((id) => g.triage!.changes.find((change) => change.id === id)!)
+    .map((change) => `${change.path}:${change.newCount > 0 ? change.newStart : change.oldStart}`)
+    .join(", ");
   askClaude(
-    `Explain the step at ${where}, part of "${stop.block.title}" (${stop.block.intent}). ` +
+    `Explain the change at ${where}, part of "${stop.block.title}" (${stop.block.intent}). ` +
       "Say briefly what it does and whether anything is wrong with it.",
-    `Explain ${shortLocation(stop.anchor)}`,
+    `Explain: ${stop.block.title}`,
   );
 }
 
-// The lines of the current step carry a bar in the diff.
+// Proven lines are dimmed, and the lines of the current place carry a bar.
 function updateMarks(): void {
   const g = guide;
-  if (!g?.triage) return setMarks(null);
+  if (!g?.triage || g.phase !== "done") return setMarks(null);
   const proven = new Map<string, string>();
   for (const change of g.triage.changes) {
     for (const line of change.proven) proven.set(lineAnchor(change.fileHash, line.side, line.line), line.detail);
@@ -651,7 +662,7 @@ function startedKey(pr: PrRef): string {
   return `guide-started ${prKey(pr)}`;
 }
 
-// Progress belongs to one grouping of one head: a push or a regroup starts over.
+// Progress belongs to one review of one head: a push or a new review starts over.
 function progressKey(g: Guide): string {
   return `guide-progress ${prKey(g.pr)}@${g.triage?.headSha} ${g.stops.map((s) => s.anchor.id).join(",")}`;
 }
