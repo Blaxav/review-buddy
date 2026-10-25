@@ -31,11 +31,20 @@ xcodebuild -quiet \
 APP="/Applications/Review AI.app"
 BUILT="safari/build/Build/Products/Debug/Review AI.app"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+APPEX="Contents/PlugIns/Review AI Extension.appex"
 pkill -f "$APP/Contents/MacOS/Review AI" || true
+# Unregister the installed copy before replacing it: deleting the files alone
+# leaves its registration behind, and Safari then hides the new build.
+if [ -d "$APP" ]; then
+  pluginkit -r "$APP/$APPEX" || true
+  "$LSREGISTER" -u "$APP" || true
+fi
 rm -rf "$APP"
 cp -R "$BUILT" "$APP"
-pluginkit -r "$BUILT/Contents/PlugIns/Review AI Extension.appex" || true
+pluginkit -r "$BUILT/$APPEX" || true
 "$LSREGISTER" -u "$BUILT" || true
 rm -rf "$BUILT" "safari/build/Build/Products/Debug/Review AI Extension.appex"
+"$LSREGISTER" -f "$APP"
+pluginkit -a "$APP/$APPEX"
 open "$APP"
 
