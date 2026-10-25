@@ -18,7 +18,9 @@ github.com PR page in Safari
   - **Whitespace**: blank lines, and code whose tokens are unchanged. Indentation still counts in Python and YAML.
   - **Generated**: lockfiles, and files `.gitattributes` marks `linguist-generated`.
 
-  Claude then orders the rest into blocks of steps. A small bar at the bottom of the page walks them: each **Next** scrolls GitHub's diff to the next change and shows one line on what it does, plus a concern only when there is one. In the diff, proven lines are dimmed and the current step's lines get a bar. The outline button lists the blocks and what was set aside. The helper checks that every change left to review is in exactly one step, and saves the result per PR head under `~/.review-ai/guides`.
+  It also marks the changes that touch only import statements: they aren't proven safe, so they stay in the walk, but they are read with the code that uses the names and never get a stop of their own.
+
+  Claude then writes a briefing and orders the rest into blocks of steps. A small bar at the bottom of the page opens on the briefing: what the PR changes in behaviour, and the one to three places to read closely, each a link to its step. **Start** walks the steps: each **Next** scrolls GitHub's diff to the change the step's note is about, shows the block's intent on entering it, a note on what the step does, what to verify when it's a place to read closely, and a concern only when Claude confirmed one by reading the code. Steps are tagged **Read closely** or **Skim**. In the diff, proven lines are dimmed and the current step's lines get a bar. The outline button lists the blocks and what was set aside. The helper checks that every change left to review is in exactly one step, and saves the result per PR head under `~/.review-ai/guides`.
 - **Comments**: Claude proposes them in a `review-comments` JSON block. Each one shows as an editable card, and nothing is posted until you click **Post**.
 
 ## Setup

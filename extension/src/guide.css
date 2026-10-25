@@ -61,7 +61,10 @@
 }
 .done-mark { color: var(--success); display: inline-flex; }
 
-/* The second row: where the change is, and Claude's one-line note. */
+/* Entering a block: what its steps add up to. */
+.intent { color: var(--fg-muted); font-size: 12px; }
+
+/* Where the step is, its tags, and Claude's note. */
 .where {
   flex-shrink: 0;
   max-width: 40%;
@@ -76,8 +79,17 @@
   white-space: nowrap;
   display: block;
 }
-.where:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
-.note { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.where:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.more { font-size: 12px; cursor: default; }
+/* A note is a sentence: it wraps, up to three lines. */
+.note {
+  color: var(--fg);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
 .tag {
   flex-shrink: 0;
   padding: 0 6px;
@@ -87,8 +99,36 @@
   font-size: 11px;
   font-weight: 600;
 }
+.tag.focus { background: var(--claude-soft); color: var(--claude); }
+.tag.skim { background: var(--bg-muted); color: var(--fg-muted); font-weight: 500; }
 .review-bar .row > .icon-warning { color: var(--danger); margin-left: 2px; }
-.check { color: var(--fg); }
+.review-bar .row > .icon-chevron { color: var(--claude); margin-left: 2px; }
+.check, .verify { line-height: 1.4; }
+.review-bar .row:has(> .note), .review-bar .row:has(> .check), .review-bar .row:has(> .verify) { align-items: flex-start; }
+.review-bar .row:has(> .note) > *, .review-bar .row > .icon { margin-top: 2px; }
+
+/* The briefing: what the PR changes, and the places to read closely. */
+.summary-text { margin: 0 0 2px; line-height: 1.45; }
+/* The locations line up in one column, the reasons in another. */
+.focus-list { display: grid; grid-template-columns: auto 1fr; row-gap: 2px; }
+.focus-head { grid-column: 1 / -1; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--claude); margin: 2px 0; }
+.focus-item {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: start;
+  column-gap: 10px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-weight: 400;
+  text-align: left;
+}
+.focus-item:hover { background: var(--claude-soft); }
+.focus-item .where { margin-top: 1px; justify-self: start; max-width: none; }
+.review-bar code { font: 12px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg-muted); }
+.focus-item .why { line-height: 1.4; }
 
 /* The outline opens above the bar. */
 .outline {
@@ -115,6 +155,7 @@
 .summary .legend > span { display: inline-flex; align-items: center; gap: 5px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; }
 .seg.review, .dot.review { background: var(--claude); }
+.seg.imports, .dot.imports { background: color-mix(in srgb, var(--claude) 35%, var(--bg)); }
 .seg.moved, .dot.moved { background: color-mix(in srgb, var(--fg-muted) 70%, var(--bg)); }
 .seg.renamed, .dot.renamed { background: color-mix(in srgb, var(--fg-muted) 50%, var(--bg)); }
 .seg.whitespace, .dot.whitespace { background: color-mix(in srgb, var(--fg-muted) 32%, var(--bg)); }

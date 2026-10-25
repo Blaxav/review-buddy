@@ -1,15 +1,28 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { linesToReview, prKey, type GuideEvent, type PrRef, type ReviewBlock, type Triage } from "../shared/protocol";
+import {
+  linesToReview,
+  prKey,
+  type FocusPoint,
+  type GuideEvent,
+  type PrRef,
+  type ReviewBlock,
+  type ReviewGuide,
+  type ReviewStep,
+  type Triage,
+} from "../shared/protocol";
 import { mapClaudeLine } from "./claude-events";
 import { HOME_DIR } from "./config";
 import { run, type Checkout } from "./github";
 import { GUIDE_SCHEMA, guidePrompt } from "./prompt";
 import { ALLOWED_TOOLS, getLatestCheckout } from "./session";
-import { classify, isLockfile, parseChanges, type RawChange } from "./triage";
+import { classify, isImportsOnly, isLockfile, parseChanges, type RawChange } from "./triage";
 
 // Versioned: a saved guide in an older shape is grouped again.
-const GUIDES_DIR = join(HOME_DIR, "guides", "v2");
+const GUIDES_DIR = join(HOME_DIR, "guides", "v3");
+
+// The places the briefing asks the reviewer to read closely, at most.
+const MAX_FOCUS = 3;
 
 type Triaged = { triage: Triage; raw: RawChange[] };
 
@@ -18,7 +31,7 @@ type Triaged = { triage: Triage; raw: RawChange[] };
 // result is saved for the next time the PR is opened.
 type Job = {
   triaged: Promise<Triaged>;
-  blocks: Promise<ReviewBlock[]>;
+  guide: Promise<ReviewGuide>;
   listeners: Set<(event: GuideEvent) => void>;
 };
 
@@ -37,7 +50,7 @@ export async function streamGuide(pr: PrRef, regroup: boolean, send: (event: Gui
   if (!job) {
     job = startJob(pr, checkout, file);
     jobs.set(key, job);
-    job.blocks.catch(() => jobs.delete(key));
+    job.guide.catch(() => jobs.delete(key));
   }
   send({ type: "status", message: "Sorting out moves, renames and whitespace…" });
   const { triage } = await job.triaged;
@@ -46,7 +59,7 @@ export async function streamGuide(pr: PrRef, regroup: boolean, send: (event: Gui
   send({ type: "status", message: `Claude is grouping ${count} change${count === 1 ? "" : "s"} into blocks…` });
   job.listeners.add(send);
   try {
-    send({ type: "blocks", blocks: await job.blocks });
+    send({ type: "guide", guide: await job.guide });
   } finally {
     job.listeners.delete(send);
   }
@@ -56,20 +69,20 @@ function startJob(pr: PrRef, checkout: Checkout, file: string): Job {
   const listeners = new Set<(event: GuideEvent) => void>();
   const saved = readSaved(file);
   if (saved) {
-    return { triaged: Promise.resolve({ triage: saved.triage, raw: [] }), blocks: Promise.resolve(saved.blocks), listeners };
+    return { triaged: Promise.resolve({ triage: saved.triage, raw: [] }), guide: Promise.resolve(saved.guide), listeners };
   }
   const triaged = triagePr(checkout);
-  const blocks = triaged.then(async ({ triage, raw }) => {
+  const guide = triaged.then(async ({ triage, raw }) => {
     const emit = (event: GuideEvent) => listeners.forEach((listener) => listener(event));
-    const blocks = await groupChanges(pr, checkout, triage, raw, emit);
+    const guide = await groupChanges(pr, checkout, triage, raw, emit);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ triage, blocks }));
-    return blocks;
+    writeFileSync(file, JSON.stringify({ triage, guide }));
+    return guide;
   });
-  return { triaged, blocks, listeners };
+  return { triaged, guide, listeners };
 }
 
-function readSaved(file: string): { triage: Triage; blocks: ReviewBlock[] } | null {
+function readSaved(file: string): { triage: Triage; guide: ReviewGuide } | null {
   if (!existsSync(file)) return null;
   try {
     return JSON.parse(readFileSync(file, "utf8"));
@@ -94,11 +107,21 @@ export async function triagePr({ dir, mergeBase, info }: Checkout): Promise<Tria
     (path) => generated.has(path) || isLockfile(path),
     (names, at) => (at === "head" ? namesAtHead(dir, names) : namesAtBase(dir, mergeBase, names, changedOld, changedNew)),
   );
+  const files = new Map<string, Promise<string[]>>();
+  const fileLines = (at: "base" | "head", path: string) => {
+    const key = `${at}:${path}`;
+    if (!files.has(key)) {
+      const text = at === "head" ? Bun.file(join(dir, path)).text() : run(["git", "show", `${mergeBase}:${path}`], dir);
+      files.set(key, text.then((t) => t.split("\n"), () => []));
+    }
+    return files.get(key)!;
+  };
+  const importsOnly = await Promise.all(changes.map((change, i) => isImportsOnly(raw[i]!, change.proven, fileLines)));
   const sha256 = (path: string) => new Bun.CryptoHasher("sha256").update(path).digest("hex");
   return {
     triage: {
       headSha: info.headRefOid,
-      changes: changes.map((change, i) => ({ id: `c${i + 1}`, fileHash: sha256(change.path), ...change })),
+      changes: changes.map((change, i) => ({ id: `c${i + 1}`, fileHash: sha256(change.path), ...change, importsOnly: importsOnly[i]! })),
       renames,
     },
     raw,
@@ -147,8 +170,8 @@ async function namesAtBase(dir: string, mergeBase: string, names: string[], chan
 
 // --- Grouping -----------------------------------------------------------------
 
-async function groupChanges(pr: PrRef, checkout: Checkout, triage: Triage, raw: RawChange[], emit: (event: GuideEvent) => void): Promise<ReviewBlock[]> {
-  if (!triage.changes.some((change) => linesToReview(change) > 0)) return [];
+async function groupChanges(pr: PrRef, checkout: Checkout, triage: Triage, raw: RawChange[], emit: (event: GuideEvent) => void): Promise<ReviewGuide> {
+  if (!triage.changes.some((change) => linesToReview(change) > 0)) return { summary: "", focus: [], blocks: [] };
   const proc = Bun.spawn(
     [
       "claude", "-p",
@@ -190,37 +213,80 @@ async function groupChanges(pr: PrRef, checkout: Checkout, triage: Triage, raw: 
   const code = await proc.exited;
   if (failure) throw new Error(failure);
   if (output === undefined) throw new Error(`Claude exited (code ${code}) without grouping the changes`);
-  return assembleBlocks(output, triage);
+  return assembleGuide(output, triage);
 }
 
 // Keeps Claude's walk honest: only changes with lines left to review, each in
-// one step; whatever Claude left out goes to a last block, so nothing is hidden.
-export function assembleBlocks(output: unknown, triage: Triage): ReviewBlock[] {
+// one step, and each step scrolling to a change it holds that isn't only
+// imports. An import change Claude left out joins a step in its file; any
+// other goes to a last block, so nothing is hidden.
+export function assembleGuide(output: unknown, triage: Triage): ReviewGuide {
+  const changes = new Map(triage.changes.map((change) => [change.id, change]));
   const toReview = new Set(triage.changes.filter((change) => linesToReview(change) > 0).map((change) => change.id));
   const assigned = new Set<string>();
+  const wanted = new Map<ReviewStep, string>();
+  const result = (output ?? {}) as Record<string, unknown>;
   const blocks: ReviewBlock[] = [];
-  for (const item of list((output as { blocks?: unknown })?.blocks)) {
+  for (const item of list(result.blocks)) {
     const block = (item ?? {}) as Record<string, unknown>;
-    const steps = list(block.steps).flatMap((entry) => {
+    const steps = list(block.steps).flatMap((entry): ReviewStep[] => {
       const step = (entry ?? {}) as Record<string, unknown>;
-      const changes = strings(step.changes).filter((id) => toReview.has(id) && !assigned.has(id));
-      if (changes.length === 0) return [];
-      for (const id of changes) assigned.add(id);
-      return [{ changes, note: text(step.note), check: text(step.check), outsideIntent: step.outside_intent === true }];
+      const ids = strings(step.changes).filter((id) => toReview.has(id) && !assigned.has(id));
+      if (ids.length === 0) return [];
+      for (const id of ids) assigned.add(id);
+      const reviewStep: ReviewStep = {
+        changes: ids,
+        anchor: "",
+        note: text(step.note),
+        check: text(step.check),
+        skim: step.skim === true || ids.every((id) => changes.get(id)!.importsOnly),
+        outsideIntent: step.outside_intent === true,
+      };
+      wanted.set(reviewStep, text(step.anchor));
+      return [reviewStep];
     });
     if (steps.length === 0) continue;
     blocks.push({ id: `b${blocks.length + 1}`, title: text(block.title) || "Untitled block", intent: text(block.intent), steps });
   }
-  const left = [...toReview].filter((id) => !assigned.has(id));
+
+  const left: string[] = [];
+  for (const id of toReview) {
+    if (assigned.has(id)) continue;
+    const change = changes.get(id)!;
+    const home = change.importsOnly
+      ? blocks.flatMap((b) => b.steps).find((step) => step.changes.some((other) => changes.get(other)!.path === change.path))
+      : undefined;
+    if (home) home.changes.push(id);
+    else left.push(id);
+  }
   if (left.length > 0) {
     blocks.push({
       id: `b${blocks.length + 1}`,
       title: "Left out of the blocks",
       intent: "Claude didn't place these changes. Review them on their own.",
-      steps: left.map((id) => ({ changes: [id], note: "", check: "", outsideIntent: false })),
+      steps: left.map((id) => ({ changes: [id], anchor: "", note: "", check: "", skim: false, outsideIntent: false })),
     });
   }
-  return blocks;
+
+  for (const step of blocks.flatMap((b) => b.steps)) {
+    const code = step.changes.filter((id) => !changes.get(id)!.importsOnly);
+    const asked = wanted.get(step) ?? "";
+    step.anchor = code.includes(asked) ? asked : (code[0] ?? step.changes[0]!);
+  }
+
+  const stepOf = new Map(blocks.flatMap((b) => b.steps.flatMap((step) => step.changes.map((id) => [id, step] as const))));
+  const seen = new Set<ReviewStep>();
+  const focus: FocusPoint[] = [];
+  for (const item of list(result.focus)) {
+    const point = (item ?? {}) as Record<string, unknown>;
+    const id = text(point.change);
+    const why = text(point.why);
+    const step = stepOf.get(id);
+    if (!step || !why || changes.get(id)!.importsOnly || seen.has(step) || focus.length >= MAX_FOCUS) continue;
+    seen.add(step);
+    focus.push({ change: id, why });
+  }
+  return { summary: text(result.summary), focus, blocks };
 }
 
 function list(value: unknown): unknown[] {

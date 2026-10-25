@@ -52,7 +52,7 @@ function ask({ pr, question, selection }: AskRequest): Response {
   return new Response(stream, { headers: { ...CORS_HEADERS, "Content-Type": "application/x-ndjson" } });
 }
 
-// Streams the smart review: the triage, Claude's progress, then the blocks.
+// Streams the smart review: the triage, Claude's progress, then the guide.
 // The grouping goes on when the reader leaves, so a cancelled stream only stops sending.
 function guide({ pr, regroup }: GuideRequest): Response {
   const encoder = new TextEncoder();

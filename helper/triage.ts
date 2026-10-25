@@ -118,7 +118,7 @@ export type NameLookup = (names: string[], at: "head" | "base") => Promise<Set<s
 
 type Work = { change: RawChange; removed: (ProvenLine | null)[]; added: (ProvenLine | null)[] };
 
-export type Classified = { changes: Omit<Change, "id" | "fileHash">[]; renames: Rename[] };
+export type Classified = { changes: Omit<Change, "id" | "fileHash" | "importsOnly">[]; renames: Rename[] };
 
 export async function classify(
   changes: RawChange[],
@@ -332,4 +332,53 @@ function identifierSwaps(before: string, after: string): Rename[] | null {
 
 function isRenameable(token: string): boolean {
   return IDENTIFIER.test(token) && !KEYWORDS.has(token);
+}
+
+// --- Imports ------------------------------------------------------------------
+
+// A top-level statement that only brings names into scope. Indented imports,
+// such as Python's local ones, sit inside code and stay as code.
+const IMPORT_START = /^(import\b|from\s+[\w.]+\s+import\b|use\s|#include\b)/;
+
+// Whether every line left to review in a change belongs to an import
+// statement, judged in the file at the base for removed lines and at the head
+// for added ones. Not a proof that the change is safe: it says where the change
+// is read, with the code that uses the names.
+export async function isImportsOnly(
+  change: RawChange,
+  proven: ProvenLine[],
+  fileLines: (at: "base" | "head", path: string) => Promise<string[]>,
+): Promise<boolean> {
+  const isProven = (side: Side, line: number) => proven.some((p) => p.side === side && p.line === line);
+  const added = change.added.filter((line) => !isProven("RIGHT", line.line));
+  const removed = change.removed.filter((line) => !isProven("LEFT", line.line));
+  if (added.length + removed.length === 0) return false;
+  if (added.length > 0) {
+    const head = await fileLines("head", change.path);
+    if (!added.every((line) => isImportLine(head, line.line))) return false;
+  }
+  if (removed.length > 0) {
+    const base = await fileLines("base", change.oldPath);
+    if (!removed.every((line) => isImportLine(base, line.line))) return false;
+  }
+  return true;
+}
+
+// Whether line `line` (1-based) of a file is part of an import statement. The
+// statement starts at the nearest unindented line at or above it that doesn't
+// open with a closing bracket, and the line belongs to it while the brackets
+// the statement opened are still open.
+export function isImportLine(lines: string[], line: number): boolean {
+  let start = line - 1;
+  if (start < 0 || start >= lines.length) return false;
+  while (start > 0 && /^(\s|[)\]}]|$)/.test(lines[start]!)) start--;
+  if (!IMPORT_START.test(lines[start]!)) return false;
+  let depth = 0;
+  for (let i = start; i < line - 1; i++) {
+    for (const char of lines[i]!) {
+      if ("([{".includes(char)) depth++;
+      else if (")]}".includes(char)) depth--;
+    }
+  }
+  return start === line - 1 || depth > 0;
 }

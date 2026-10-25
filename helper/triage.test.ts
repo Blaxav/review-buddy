@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { classify, parseChanges, tokenize, type NameLookup } from "./triage";
+import { classify, isImportLine, isImportsOnly, parseChanges, tokenize, type NameLookup } from "./triage";
 
 const noNames: NameLookup = async () => new Set();
 
@@ -113,4 +113,23 @@ test("inconsistent renames, keywords and string changes are not renames", async 
 test("generated files are proven whole", async () => {
   const text = file("bun.lock", "bun.lock", "@@ -1 +1 @@\n-a\n+b\n");
   expect((await kinds(text, noNames, ["bun.lock"])).lines).toEqual(["bun.lock L1:generated R1:generated"]);
+});
+
+test("import lines are found inside the statement that starts them", () => {
+  const python = ["from a.models import (", "    Level,", "    Kind,", ")", "import os", "", "def f():", "    import json", "    x = (", "        Level,", "    )"];
+  expect([1, 2, 3, 4, 5].map((n) => isImportLine(python, n))).toEqual([true, true, true, true, true]);
+  expect([6, 7, 8, 10].map((n) => isImportLine(python, n))).toEqual([false, false, false, false]);
+  const ts = ['import type { A } from "a";', "import {", "  b,", '} from "b";', "  call();"];
+  expect([1, 2, 3, 4, 5].map((n) => isImportLine(ts, n))).toEqual([true, true, true, true, false]);
+});
+
+test("a change is imports only when every line left to review is an import", async () => {
+  const head = ["from a import (", "    Level,", "    Kind,", ")", "", "x = Level"];
+  const base = ["from a import Level", "", "x = Level"];
+  const files = async (at: "base" | "head") => (at === "head" ? head : base);
+  const [imports, code] = parseChanges(
+    file("a.py", "a.py", "@@ -1 +1,4 @@\n-from a import Level\n+from a import (\n+    Level,\n+    Kind,\n+)\n@@ -3 +6 @@\n-x = 1\n+x = Level\n"),
+  );
+  expect(await isImportsOnly(imports!, [], files)).toBe(true);
+  expect(await isImportsOnly(code!, [], files)).toBe(false);
 });

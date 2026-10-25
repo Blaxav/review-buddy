@@ -68,32 +68,46 @@ export type Change = {
   newStart: number;
   newCount: number;
   proven: ProvenLine[];
+  importsOnly: boolean;
 };
 
 export function linesToReview(change: Change): number {
   return change.oldCount + change.newCount - change.proven.length;
 }
 
+// The lines a reviewer reads closely: those left to review, outside imports.
+export function linesToRead(change: Change): number {
+  return change.importsOnly ? 0 : linesToReview(change);
+}
+
 export type Rename = { from: string; to: string };
 
 export type Triage = { headSha: string; changes: Change[]; renames: Rename[] };
 
-// One stop of the smart review: changes read together, with a one-line note
-// on what they do and, only when something deserves a look, a concern.
-// `outsideIntent` flags a change the PR doesn't announce.
-export type ReviewStep = { changes: string[]; note: string; check: string; outsideIntent: boolean };
+// One stop of the smart review: changes read together, with a note on what
+// they do and, only when Claude confirmed one, a concern. `anchor` is the
+// change the note is about, where the diff scrolls; `skim` marks mechanical
+// steps; `outsideIntent` flags a change the PR doesn't announce.
+export type ReviewStep = { changes: string[]; anchor: string; note: string; check: string; skim: boolean; outsideIntent: boolean };
 
 // Steps that make one logical change, in the order to read them. Every change
 // with a line left to review is in exactly one step.
 export type ReviewBlock = { id: string; title: string; intent: string; steps: ReviewStep[] };
 
+// A place to read closely, and what to verify there.
+export type FocusPoint = { change: string; why: string };
+
+// What the reviewer sees before the walk: what the PR changes in behaviour,
+// and the few places where attention pays off most. Then the walk itself.
+export type ReviewGuide = { summary: string; focus: FocusPoint[]; blocks: ReviewBlock[] };
+
 export type GuideRequest = { pr: PrRef; regroup?: boolean };
 
 // One line of the NDJSON stream returned by POST /guide: the triage first,
-// Claude's progress, then the blocks.
+// Claude's progress, then the guide.
 export type GuideEvent =
   | { type: "triage"; triage: Triage }
   | { type: "status"; message: string }
   | { type: "tool"; name: string; detail: string }
-  | { type: "blocks"; blocks: ReviewBlock[] }
+  | { type: "guide"; guide: ReviewGuide }
   | { type: "error"; message: string };
