@@ -3,7 +3,7 @@ import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
 import { setDocked } from "./diff-marks";
-import { guideBar, guideCss, guideStarter, initGuide, setGuideDocked, setGuidePr } from "./guide";
+import { guideBar, guideCss, guideLive, guideStarter, initGuide, setGuideDocked, setGuidePr } from "./guide";
 import { ASK_PORT } from "./messages";
 import { icon } from "./icons";
 import css from "./overlay.css" with { type: "text" };
@@ -64,7 +64,7 @@ const launcher = h(
   { className: "launcher", title: "Ask Claude about this PR", ariaLabel: "Ask Claude", onclick: () => void setPanelOpen(true) },
   icon("sparkle"),
 );
-root.append(h("style", { textContent: theme + css + guideCss }), panel, launcher, guideStarter, guideBar);
+root.append(h("style", { textContent: theme + css + guideCss }), panel, launcher, guideStarter, guideBar, guideLive);
 panel.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setPanelOpen(false);
 });

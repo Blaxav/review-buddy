@@ -16,6 +16,8 @@
   /* Claude's coral marks what Claude does; everything else is GitHub's palette. */
   --claude: #d97757;
   --claude-soft: color-mix(in srgb, var(--claude) 12%, var(--bg));
+  /* Coral for text: mixed toward the foreground, so it reads at 4.5:1 in both themes. */
+  --claude-text: color-mix(in srgb, var(--claude) 65%, var(--fg));
   --ring: color-mix(in srgb, var(--accent) 35%, transparent);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;

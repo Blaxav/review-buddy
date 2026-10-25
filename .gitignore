@@ -3,3 +3,6 @@ dist/
 extension/dist/
 safari/
 *.bun-build
+
+# Third-party design skills (impeccable.style, designwithintent.ai), installed locally
+.claude/skills/

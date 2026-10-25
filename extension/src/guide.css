@@ -47,18 +47,10 @@
 .review-bar button.next .icon { width: 14px; height: 14px; }
 .review-bar .status { margin-top: 1px; }
 
-.counter {
-  flex-shrink: 0;
-  min-width: 34px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: var(--claude);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
+/* The last row holds the buttons, so Next stays put from step to step. */
+.review-bar .controls { margin-top: 2px; padding-top: 6px; border-top: 1px solid var(--border-muted); }
+.progress { color: var(--fg-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .done-mark { color: var(--success); display: inline-flex; }
 
 /* Entering a block: what its steps add up to. */
@@ -80,16 +72,11 @@
   display: block;
 }
 button.where:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
-.more { font-size: 12px; cursor: default; }
-/* A note is a sentence: it wraps, up to three lines. */
-.note {
-  color: var(--fg);
-  line-height: 1.4;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
+/* Steps through the other changes of a step, which the diff marks too. */
+button.more { padding: 1px 4px 1px 8px; gap: 2px; border: 0; border-radius: 6px; background: none; color: var(--fg-muted); font-size: 12px; font-weight: 500; }
+button.more:hover { background: var(--bg-muted); color: var(--fg); }
+button.more .icon { width: 12px; height: 12px; }
+.note { margin: 0; line-height: 1.45; }
 .tag {
   flex-shrink: 0;
   padding: 0 6px;
@@ -99,19 +86,32 @@ button.where:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)
   font-size: 11px;
   font-weight: 600;
 }
-.tag.focus { background: var(--claude-soft); color: var(--claude); }
+.tag.focus { background: var(--claude-soft); color: var(--claude-text); }
 .tag.skim { background: var(--bg-muted); color: var(--fg-muted); font-weight: 500; }
-.review-bar .row > .icon-warning { color: var(--danger); margin-left: 2px; }
-.review-bar .row > .icon-chevron { color: var(--claude); margin-left: 2px; }
-.check, .verify { line-height: 1.4; }
-.review-bar .row:has(> .note), .review-bar .row:has(> .check), .review-bar .row:has(> .verify) { align-items: flex-start; }
-.review-bar .row:has(> .note) > *, .review-bar .row > .icon { margin-top: 2px; }
+
+/* "Verify" and "Concern" label their line; the labels share a width so the text lines up. */
+.review-bar .row:has(> .label) { align-items: baseline; }
+.label {
+  flex-shrink: 0;
+  width: 72px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.label .icon { width: 12px; height: 12px; }
+.verify-label { color: var(--claude-text); }
+.check-label { color: var(--danger); }
+.check, .verify { line-height: 1.45; }
 
 /* The briefing: what the PR changes, and the places to read closely. */
 .summary-text { margin: 0 0 2px; line-height: 1.45; }
 /* The locations line up in one column, the reasons in another. */
 .focus-list { display: grid; grid-template-columns: auto 1fr; row-gap: 2px; }
-.focus-head { grid-column: 1 / -1; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--claude); margin: 2px 0; }
+.focus-head { grid-column: 1 / -1; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--claude-text); margin: 2px 0; }
 .focus-item {
   grid-column: 1 / -1;
   display: grid;

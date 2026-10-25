@@ -44,6 +44,8 @@ type Guide = {
   outline: boolean;
   // Set when the current change couldn't be found in the page.
   lost?: string;
+  // The change of the current step the diff shows, when not its anchor.
+  shown?: string;
   port: Browser.Runtime.Port | null;
 };
 
@@ -71,10 +73,37 @@ export const guideStarter = h(
   "Smart review",
 );
 export const guideBar = h("div", { className: "review-bar", hidden: true });
+guideBar.setAttribute("role", "region");
+guideBar.setAttribute("aria-label", "Smart review");
+// Announces each step to screen readers; it outlives the bar's rebuilds.
+export const guideLive = h("div", { className: "visually-hidden" });
+guideLive.setAttribute("aria-live", "polite");
 
 // `ask` opens the chat on a question about a change.
 export function initGuide(ask: (question: string, label: string) => void): void {
   askClaude = ask;
+  document.addEventListener("keydown", onKey, true);
+}
+
+// ] and [ walk the steps, Escape closes the outline. Keys typed into a field
+// are left alone, and so are GitHub's own shortcuts, which use other keys.
+function onKey(event: KeyboardEvent): void {
+  const g = guide;
+  if (!g || g.phase !== "done" || g.stops.length === 0) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || isTyping(event)) return;
+  if (event.key === "]" && g.at < g.stops.length) go(g, g.at + 1);
+  else if (event.key === "[" && g.at > 0) go(g, g.at - 1);
+  else if (event.key === "Escape" && g.outline) {
+    g.outline = false;
+    render();
+  } else return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function isTyping(event: KeyboardEvent): boolean {
+  const target = event.composedPath()[0];
+  return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 }
 
 // Moves the bar out from under the chat panel.
@@ -203,6 +232,10 @@ function render(): void {
   guideBar.hidden = !g || g.phase === "idle";
   if (!g || g.phase === "idle") return guideBar.replaceChildren();
 
+  // Rebuilding the bar drops the focused button: put focus back on its successor.
+  const focused = (guideBar.getRootNode() as ShadowRoot).activeElement;
+  const refocus = focused instanceof HTMLElement && guideBar.contains(focused) ? focused.dataset.key : undefined;
+
   const close = iconButton("close", "End the smart review", () => end(g));
   let rows: HTMLElement[];
   if (g.phase === "running") {
@@ -236,20 +269,24 @@ function render(): void {
           "Smart review",
           h("span", { className: "muted", textContent: ` · ${steps} step${steps === 1 ? "" : "s"}, ${fmt(read)} line${read === 1 ? "" : "s"} to read` }),
         ),
-        outlineButton(g),
-        h("button", { className: "primary next", onclick: () => go(g, 0) }, "Start", icon("chevron")),
         close,
       ),
       ...renderBriefing(g),
+      controls(h("span", { className: "grow" }), outlineButton(g), nextButton(g, "Start", "Start the walk")),
     ];
   } else if (g.at >= g.stops.length) {
     rows = [
       row(
         h("span", { className: "done-mark" }, icon("check")),
-        h("div", { className: "grow title", textContent: `Walked all ${g.review!.blocks.length} blocks` }),
-        outlineButton(g),
-        h("button", { textContent: "From the start", onclick: () => go(g, 0) }),
+        h("div", { className: "grow title", textContent: `Walked all ${g.stops.length} steps` }),
         close,
+      ),
+      ...renderBriefing(g, false),
+      controls(
+        h("span", { className: "grow" }),
+        outlineButton(g),
+        backButton(g),
+        h("button", { textContent: "From the start", onclick: () => go(g, 0) }),
       ),
     ];
   } else {
@@ -257,59 +294,98 @@ function render(): void {
   }
   guideBar.replaceChildren(...rows);
   if (g.outline) guideBar.prepend(renderOutline(g));
+  if (refocus) guideBar.querySelector<HTMLElement>(`[data-key="${refocus}"]`)?.focus();
+}
+
+// The bar's last row: its buttons keep their place from one step to the next.
+function controls(...children: (Node | string)[]): HTMLElement {
+  return h("div", { className: "row controls" }, ...children);
+}
+
+function nextButton(g: Guide, label: string, title: string): HTMLButtonElement {
+  const button = h("button", { className: "primary next", title: `${title} (])`, onclick: () => go(g, g.at + 1) }, label, icon("chevron"));
+  button.dataset.key = "next";
+  return button;
+}
+
+function backButton(g: Guide): HTMLButtonElement {
+  const button = iconButton("back", "Previous step ([)", () => go(g, g.at - 1), g.at === 0);
+  button.dataset.key = "back";
+  return button;
 }
 
 function renderStop(g: Guide, stop: Stop, close: HTMLElement): HTMLElement[] {
-  const { block, step, stepIndex, anchor } = stop;
+  const { block, step, stepIndex } = stop;
   const blocks = g.review!.blocks.length;
-  const top = row(
-    h("span", { className: "counter", title: `Block ${stop.blockIndex + 1} of ${blocks}` }, `${stop.blockIndex + 1}/${blocks}`),
-    h(
-      "div",
-      { className: "grow title", title: block.intent || block.title },
-      block.title,
-      block.steps.length > 1 ? h("span", { className: "muted", textContent: ` · step ${stepIndex + 1} of ${block.steps.length}` }) : "",
+  const rows = [
+    row(
+      h(
+        "div",
+        { className: "grow title" },
+        block.title,
+        blocks > 1 ? h("span", { className: "muted", textContent: ` · block ${stop.blockIndex + 1} of ${blocks}` }) : "",
+      ),
+      close,
     ),
-    iconButton("sparkle", "Ask Claude about this step", () => askAbout(g, stop)),
-    outlineButton(g),
-    iconButton("back", "Previous step", () => go(g, g.at - 1), g.at === 0),
-    h("button", { className: "primary next", title: "Next step", onclick: () => go(g, g.at + 1) }, g.at === g.stops.length - 1 ? "Finish" : "Next", icon("chevron")),
-    close,
-  );
-  const rows = [top];
+  ];
   // Entering a block, its intent says what the steps add up to.
   if (stepIndex === 0 && block.intent) rows.push(row(h("span", { className: "grow intent" }, ...prose(block.intent))));
 
-  const changes = new Map(g.triage!.changes.map((change) => [change.id, change]));
-  const others = step.changes.filter((id) => id !== anchor.id).map((id) => changes.get(id)!);
+  // The anchor first: the walk lands there, and the rest follow in order.
+  const changes = [stop.anchor, ...step.changes.filter((id) => id !== stop.anchor.id).map((id) => g.triage!.changes.find((change) => change.id === id)!)];
+  const shown = changes.find((change) => change.id === g.shown) ?? stop.anchor;
   const focus = g.review!.focus.find((point) => step.changes.includes(point.change));
+  const meta = row(
+    h("button", { className: "where", title: `${location(shown)} · show it again`, onclick: () => void goTo(g, shown) }, shortLocation(shown)),
+  );
+  if (changes.length > 1) {
+    const at = changes.indexOf(shown);
+    const following = changes[(at + 1) % changes.length]!;
+    const more = h(
+      "button",
+      {
+        className: "more",
+        title: `Show ${location(following)}`,
+        onclick: () => {
+          g.shown = following.id;
+          render();
+          void goTo(g, following);
+        },
+      },
+      `${at + 1} of ${changes.length} changes`,
+      icon("chevron"),
+    );
+    more.dataset.key = "more";
+    meta.append(more);
+  }
+  if (focus) meta.append(h("span", { className: "tag focus", title: "One of the places the briefing asks you to read closely", textContent: "Read closely" }));
+  else if (step.skim) meta.append(h("span", { className: "tag skim", title: "Mechanical: wiring, imports, fakes or docs", textContent: "Skim" }));
+  if (step.outsideIntent) {
+    meta.append(h("span", { className: "tag", title: "Neither the block's intent nor the PR description announces this change", textContent: "Not in the PR description" }));
+  }
+  rows.push(meta);
+  if (step.note) rows.push(row(h("p", { className: "grow note" }, ...prose(step.note))));
+  if (focus) rows.push(row(h("span", { className: "label verify-label", textContent: "Verify" }), h("span", { className: "grow verify" }, ...prose(focus.why))));
+  if (step.check) rows.push(row(h("span", { className: "label check-label" }, icon("warning"), "Concern"), h("span", { className: "grow check" }, ...prose(step.check))));
+  if (g.lost) rows.push(row(h("span", { className: "grow error", textContent: g.lost })));
   rows.push(
-    row(
-      h("button", { className: "where", title: `${location(anchor)} · show it again`, onclick: () => void goTo(g, anchor) }, shortLocation(anchor)),
-      others.length > 0 ? h("span", { className: "muted more", title: others.map(location).join("\n"), textContent: `+${others.length} more` }) : "",
-      focus
-        ? h("span", { className: "tag focus", title: "One of the places the briefing asks you to read closely", textContent: "Read closely" })
-        : step.skim
-          ? h("span", { className: "tag skim", title: "Mechanical: wiring, imports, fakes or docs", textContent: "Skim" })
-          : "",
-      step.outsideIntent
-        ? h("span", { className: "tag", title: "Neither the block's intent nor the PR description announces this change", textContent: "Unannounced" })
-        : "",
-      h("span", { className: "grow note" }, ...prose(step.note)),
+    controls(
+      h("span", { className: "grow progress", textContent: `Step ${g.at + 1} of ${g.stops.length}` }),
+      iconButton("sparkle", "Ask Claude about this step", () => askAbout(g, stop)),
+      outlineButton(g),
+      backButton(g),
+      nextButton(g, g.at === g.stops.length - 1 ? "Finish" : "Next", g.at === g.stops.length - 1 ? "Finish the walk" : "Next step"),
     ),
   );
-  if (focus) rows.push(row(icon("chevron"), h("span", { className: "grow verify" }, ...prose(focus.why))));
-  if (step.check) rows.push(row(icon("warning"), h("span", { className: "grow check" }, ...prose(step.check))));
-  if (g.lost) rows.push(row(h("span", { className: "grow error", textContent: g.lost })));
   return rows;
 }
 
 // What the reviewer reads before the walk: what the PR changes, and the
 // places to read closely, each a link to its step.
-function renderBriefing(g: Guide): HTMLElement[] {
+function renderBriefing(g: Guide, withSummary = true): HTMLElement[] {
   const { summary, focus } = g.review!;
   const items: HTMLElement[] = [];
-  if (summary) items.push(h("p", { className: "summary-text" }, ...prose(summary)));
+  if (summary && withSummary) items.push(h("p", { className: "summary-text" }, ...prose(summary)));
   const points = focus.flatMap((point) => focusItem(g, point));
   if (points.length > 0) items.push(h("div", { className: "focus-list" }, h("div", { className: "focus-head", textContent: "Read closely" }), ...points));
   return items;
@@ -365,7 +441,7 @@ function renderOutline(g: Guide): HTMLElement {
             },
           },
           h("span", { className: "num" }, walked ? icon("check") : String(i + 1)),
-          h("span", { className: "grow" }, h("span", { className: "block-title", textContent: block.title }), h("small", { textContent: block.intent })),
+          h("span", { className: "grow" }, h("span", { className: "block-title", textContent: block.title }), h("small", {}, ...prose(block.intent))),
           h("span", { className: "muted", textContent: `${lines} line${lines === 1 ? "" : "s"}` }),
         );
       }),
@@ -502,11 +578,16 @@ function basename(path: string): string {
 function go(g: Guide, at: number, change?: Change): void {
   g.at = Math.max(0, Math.min(at, g.stops.length));
   g.lost = undefined;
+  g.shown = change?.id;
+  g.outline = false;
   g.furthest = Math.max(g.furthest, g.at);
   void save(progressKey(g), { at: g.at, furthest: g.furthest });
   render();
   updateMarks();
   const stop = g.stops[g.at];
+  guideLive.textContent = stop
+    ? `Step ${g.at + 1} of ${g.stops.length}: ${stop.block.title}, ${location(change ?? stop.anchor)}`
+    : `Walked all ${g.stops.length} steps`;
   if (stop) void goTo(g, change ?? stop.anchor);
 }
 
