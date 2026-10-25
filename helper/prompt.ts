@@ -94,7 +94,7 @@ export function guidePrompt(pr: PrRef, { info, mergeBase }: Checkout, triage: Tr
     size += entry.length;
     listed.push(entry);
   });
-  return `You are preparing a guided review of GitHub pull request ${pr.owner}/${pr.repo}#${pr.number}: "${info.title}".
+  return `You are preparing a smart review of GitHub pull request ${pr.owner}/${pr.repo}#${pr.number}: "${info.title}".
 The working directory is a checkout of the PR head; see the change with \`git diff ${mergeBase} HEAD\`.
 
 A deterministic pass already set aside the lines it proved need no review: code moved to another file

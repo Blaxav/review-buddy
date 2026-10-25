@@ -50,7 +50,7 @@ export function initGuide(ask: (question: string, label: string) => void): void 
   askClaude = ask;
 }
 
-// Follows the PR shown on the page. A PR whose guided review was started
+// Follows the PR shown on the page. A PR whose smart review was started
 // before picks it up again: the helper keeps its result.
 export function setGuidePr(pr: PrRef | null): void {
   if (!pr) {
@@ -145,7 +145,7 @@ function render(): void {
           textContent:
             "Claude sorts the changes into blocks to read one at a time. Lines a check proves were moved, renamed or reformatted are dimmed in the diff, so you read only what changed.",
         }),
-        h("button", { className: "primary", textContent: "Start guided review", onclick: () => start(g, false) }),
+        h("button", { className: "primary", textContent: "Start smart review", onclick: () => start(g, false) }),
       ),
     );
     return;

@@ -48,7 +48,7 @@ isolateEvents(root, ["keydown", "keyup", "keypress"]);
 const titleEl = h("span", { className: "title" });
 const body = h("div", { className: "body" });
 const chatTab = h("button", { className: "tab", textContent: "Chat", onclick: () => setTab("chat") });
-const reviewTab = h("button", { className: "tab", textContent: "Guided review", onclick: () => setTab("review") });
+const reviewTab = h("button", { className: "tab", textContent: "Smart review", onclick: () => setTab("review") });
 const newChatButton = h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat"));
 const panel = h(
   "div",
@@ -401,7 +401,7 @@ function sync(): void {
   if (!panel.hidden) void connect();
 }
 
-// A question about a block of the guided review goes to the chat.
+// A question about a block of the smart review goes to the chat.
 initGuide((question, label) => {
   tab = "chat";
   renderBody();

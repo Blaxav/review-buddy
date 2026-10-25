@@ -12,7 +12,7 @@ const GUIDES_DIR = join(HOME_DIR, "guides");
 
 type Triaged = { triage: Triage; raw: RawChange[] };
 
-// One guided review per PR head, shared by every tab that asks for it. Claude's
+// One smart review per PR head, shared by every tab that asks for it. Claude's
 // grouping takes minutes, so it keeps running when the overlay closes, and its
 // result is saved for the next time the PR is opened.
 type Job = {

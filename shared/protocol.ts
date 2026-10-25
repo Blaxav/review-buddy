@@ -48,7 +48,7 @@ export type ThreadRequest = { pr: PrRef; selection: LineSelection };
 export type PostCommentRequest = { pr: PrRef; comment: DraftComment };
 export type PostCommentResponse = { url: string };
 
-// --- Guided review ------------------------------------------------------------
+// --- Smart review -------------------------------------------------------------
 
 // Why a changed line needs no review. Each kind is proven by a check the
 // helper runs, never by Claude's judgement.
