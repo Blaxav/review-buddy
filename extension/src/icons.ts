@@ -9,6 +9,9 @@ const PATHS = {
   file: { stroke: "M9 1.75H4.5a1 1 0 0 0-1 1v10.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-8M9 1.75v3.5h3.5M9 1.75l3.5 3.5" },
   check: { stroke: "M3 8.5 6.25 11.75 13 5" },
   insert: { stroke: "M8 2v8M4.75 6.75 8 10l3.25-3.25M3 13.5h10" },
+  blocks: { stroke: "M2.75 2.75h4v4h-4zM9.25 2.75h4v4h-4zM2.75 9.25h4v4h-4zM9.25 9.25h4v4h-4z" },
+  refresh: { stroke: "M13.25 8A5.25 5.25 0 1 1 11.7 4.3M13.25 2.5v3h-3" },
+  warning: { stroke: "M8 2 14.5 13.5h-13L8 2ZM8 6.5v3M8 11.5v.01" },
 } as const;
 
 export type IconName = keyof typeof PATHS;

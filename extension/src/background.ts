@@ -1,6 +1,6 @@
 import type Browser from "webextension-polyfill";
-import { HELPER_URL, type AskRequest, type StreamEvent, type ThreadInfo } from "../../shared/protocol";
-import { ASK_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
+import { HELPER_URL, type StreamEvent, type ThreadInfo } from "../../shared/protocol";
+import { ASK_PORT, GUIDE_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
 
 // Set by scripts/build-extension.ts from ~/.review-ai/token.
 declare const HELPER_TOKEN: string;
@@ -64,19 +64,22 @@ browser.runtime.onMessage.addListener((message: unknown) =>
   ),
 );
 
-// Streams one answer: the content script sends an AskRequest on the port and
-// receives StreamEvents until "done" or "error". Closing the port cancels the fetch.
+// Streams a helper endpoint to a port: the content script posts the request on
+// the port and receives the endpoint's events. Closing the port cancels the fetch.
+const STREAMS: Record<string, string> = { [ASK_PORT]: "/ask", [GUIDE_PORT]: "/guide" };
+
 browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
-  if (port.name !== ASK_PORT) return;
+  const path = STREAMS[port.name];
+  if (!path) return;
   const abort = new AbortController();
   port.onDisconnect.addListener(() => abort.abort());
-  const send = (event: StreamEvent) => {
+  const send = (event: unknown) => {
     if (!abort.signal.aborted) port.postMessage(event);
   };
 
   port.onMessage.addListener(async (message: unknown) => {
     try {
-      const res = await helperFetch("/ask", message as AskRequest, abort.signal);
+      const res = await helperFetch(path, message, abort.signal);
       const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = "";
       for (;;) {
@@ -85,10 +88,10 @@ browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
         buffer += value;
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
-        for (const line of lines) if (line) send(JSON.parse(line) as StreamEvent);
+        for (const line of lines) if (line) send(JSON.parse(line));
       }
     } catch (error) {
-      send({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      send({ type: "error", message: error instanceof Error ? error.message : String(error) } satisfies StreamEvent);
     }
   });
 });

@@ -1,6 +1,8 @@
 import {
   HELPER_PORT as PORT,
   type AskRequest,
+  type GuideEvent,
+  type GuideRequest,
   type PostCommentRequest,
   type PostCommentResponse,
   type PrRequest,
@@ -10,6 +12,7 @@ import {
 } from "../shared/protocol";
 import { loadToken } from "./config";
 import { postComment } from "./github";
+import { streamGuide } from "./guide";
 import { BusyError, getCheckout, getSession, resetSession } from "./session";
 
 const TOKEN = loadToken();
@@ -49,6 +52,31 @@ function ask({ pr, question, selection }: AskRequest): Response {
   return new Response(stream, { headers: { ...CORS_HEADERS, "Content-Type": "application/x-ndjson" } });
 }
 
+// Streams the guided review: the triage, Claude's progress, then the blocks.
+// The grouping goes on when the reader leaves, so a cancelled stream only stops sending.
+function guide({ pr, regroup }: GuideRequest): Response {
+  const encoder = new TextEncoder();
+  let open = true;
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: GuideEvent) => {
+        if (open) controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+      };
+      try {
+        await streamGuide(pr, regroup ?? false, send);
+      } catch (error) {
+        send({ type: "error", message: errorMessage(error) });
+      }
+      if (open) controller.close();
+      open = false;
+    },
+    cancel() {
+      open = false;
+    },
+  });
+  return new Response(stream, { headers: { ...CORS_HEADERS, "Content-Type": "application/x-ndjson" } });
+}
+
 async function handle(req: Request): Promise<Response> {
   // Rejecting other Host headers blocks DNS-rebinding pages from reaching the helper.
   if (!ALLOWED_HOSTS.has(req.headers.get("host") ?? "")) return new Response("Forbidden", { status: 403 });
@@ -62,6 +90,8 @@ async function handle(req: Request): Promise<Response> {
         return json({ ok: true });
       case "POST /ask":
         return ask((await req.json()) as AskRequest);
+      case "POST /guide":
+        return guide((await req.json()) as GuideRequest);
       case "POST /warm": {
         const { pr, selection } = (await req.json()) as PrRequest;
         (await getSession(pr, selection)).start();

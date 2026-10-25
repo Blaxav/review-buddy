@@ -2,13 +2,13 @@ import type { Subprocess } from "bun";
 import { prKey, type LineSelection, type PrRef, type StreamEvent, type ThreadInfo } from "../shared/protocol";
 import { selectionKey } from "../shared/selection";
 import { mapClaudeLine } from "./claude-events";
-import { checkoutPr, fetchThread, type Checkout } from "./github";
+import { checkoutPr, fetchPrInfo, fetchThread, type Checkout } from "./github";
 import { systemPrompt, threadPrompt } from "./prompt";
 
 const IDLE_TIMEOUT_MS = 30 * 60_000;
 
 // Read-only tools: Claude explores the checkout but cannot change it or reach the network.
-const ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)"];
+export const ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)"];
 
 export class BusyError extends Error {
   constructor() {
@@ -138,6 +138,15 @@ function cached<T>(map: Map<string, Promise<T>>, key: string, create: () => Prom
 
 export function getCheckout(pr: PrRef): Promise<Checkout> {
   return cached(checkouts, prKey(pr), () => checkoutPr(pr));
+}
+
+// The checkout of the PR's current head: checks the PR out again when it moved
+// since the cached checkout.
+export async function getLatestCheckout(pr: PrRef): Promise<Checkout> {
+  const [checkout, info] = await Promise.all([getCheckout(pr), fetchPrInfo(pr)]);
+  if (checkout.info.headRefOid === info.headRefOid) return checkout;
+  checkouts.delete(prKey(pr));
+  return getCheckout(pr);
 }
 
 function sessionKey(pr: PrRef, selection?: LineSelection): string {

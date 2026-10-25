@@ -20,4 +20,8 @@ export type BackgroundResponse =
   | { ok: true; url?: string; thread?: ThreadInfo }
   | { ok: false; error: string };
 
+// Streaming requests go over a port named after their helper endpoint: the
+// content script posts one request and receives NDJSON events until "done",
+// "blocks" or "error".
 export const ASK_PORT = "ask";
+export const GUIDE_PORT = "guide";

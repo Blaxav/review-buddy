@@ -2,6 +2,8 @@ import type Browser from "webextension-polyfill";
 import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
+import { setDocked } from "./diff-marks";
+import { guideView, initGuide, setGuidePr } from "./guide";
 import { ASK_PORT } from "./messages";
 import { icon } from "./icons";
 import css from "./overlay.css" with { type: "text" };
@@ -35,6 +37,7 @@ type Chat = { pr: PrRef; items: (Question | Answer)[]; port: Browser.Runtime.Por
 const chats = new Map<string, Chat>();
 let chat: Chat | null = null;
 let selection = "";
+let tab: "chat" | "review" = "chat";
 
 // --- Overlay skeleton -------------------------------------------------------
 
@@ -44,6 +47,9 @@ isolateEvents(root, ["keydown", "keyup", "keypress"]);
 
 const titleEl = h("span", { className: "title" });
 const body = h("div", { className: "body" });
+const chatTab = h("button", { className: "tab", textContent: "Chat", onclick: () => setTab("chat") });
+const reviewTab = h("button", { className: "tab", textContent: "Guided review", onclick: () => setTab("review") });
+const newChatButton = h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat"));
 const panel = h(
   "div",
   { className: "panel", hidden: true },
@@ -52,9 +58,10 @@ const panel = h(
     { className: "header" },
     h("span", { className: "mark" }, icon("sparkle")),
     h("div", { className: "heading" }, h("span", { className: "name", textContent: "Claude" }), titleEl),
-    h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat")),
+    newChatButton,
     h("button", { className: "icon-button", title: "Close (Esc)", ariaLabel: "Close", onclick: () => setPanelOpen(false) }, icon("close")),
   ),
+  h("div", { className: "tabs", role: "tablist" }, chatTab, reviewTab),
   body,
 );
 const launcher = h(
@@ -94,15 +101,21 @@ sendButton.addEventListener("click", () => (isStreaming() ? void stop() : submit
 async function setPanelOpen(open: boolean): Promise<void> {
   panel.hidden = !open;
   launcher.hidden = open;
+  setDocked(open);
   if (!open) return;
   await connect();
-  input.focus();
+  if (tab === "chat") input.focus();
+}
+
+function setTab(next: "chat" | "review"): void {
+  tab = next;
+  void connect();
 }
 
 async function connect(): Promise<void> {
   const res = await request({ kind: "check" });
   if (res.ok) {
-    renderChat();
+    renderBody();
     warm();
   } else {
     renderConnectionError(res.error);
@@ -120,8 +133,16 @@ function renderConnectionError(error: string): void {
   );
 }
 
+function renderBody(): void {
+  chatTab.ariaSelected = String(tab === "chat");
+  reviewTab.ariaSelected = String(tab === "review");
+  newChatButton.hidden = tab !== "chat";
+  if (tab === "review") body.replaceChildren(guideView);
+  else renderChat();
+}
+
 function renderChat(): void {
-  if (!chat) return;
+  if (!chat || tab !== "chat") return;
   body.replaceChildren(messagesEl, composer);
   if (chat.items.length === 0) {
     messagesEl.replaceChildren(
@@ -363,9 +384,15 @@ function sync(): void {
   const pr = parsePrPath(location.pathname);
   if (!pr) {
     host.remove();
+    setDocked(false);
+    setGuidePr(null);
     return;
   }
-  if (!host.isConnected) document.documentElement.append(host);
+  if (!host.isConnected) {
+    document.documentElement.append(host);
+    setDocked(!panel.hidden);
+  }
+  setGuidePr(pr);
   const key = prKey(pr);
   if (chat && prKey(chat.pr) === key) return;
   chat = chats.get(key) ?? { pr, items: [], port: null, warmed: false };
@@ -374,6 +401,12 @@ function sync(): void {
   if (!panel.hidden) void connect();
 }
 
+// A question about a block of the guided review goes to the chat.
+initGuide((question, label) => {
+  tab = "chat";
+  renderBody();
+  ask(question, label);
+});
 sync();
 setInterval(sync, 500);
 watchCommentBoxes();

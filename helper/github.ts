@@ -15,14 +15,15 @@ export type PrInfo = {
 // `mergeBase` is the commit GitHub diffs the PR head against.
 export type Checkout = { dir: string; info: PrInfo; mergeBase: string };
 
-async function run(cmd: string[], cwd?: string): Promise<string> {
-  const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe" });
+// `okCodes` lists the exit codes that aren't failures, such as 1 for a grep that finds nothing.
+export async function run(cmd: string[], cwd?: string, { input, okCodes = [0] }: { input?: string; okCodes?: number[] } = {}): Promise<string> {
+  const proc = Bun.spawn(cmd, { cwd, stdin: input === undefined ? "ignore" : new TextEncoder().encode(input), stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  if (code !== 0) {
+  if (!okCodes.includes(code)) {
     throw new Error(`${cmd.slice(0, 3).join(" ")} failed: ${stderr.trim() || stdout.trim()}`);
   }
   return stdout;
