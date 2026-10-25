@@ -38,6 +38,8 @@ type Guide = {
   at: number;
   furthest: number;
   outline: boolean;
+  // Set when the current change couldn't be found in the page.
+  lost?: string;
   port: Browser.Runtime.Port | null;
 };
 
@@ -154,10 +156,11 @@ function onEvent(target: Guide, event: GuideEvent): void {
         const { at, furthest } = (saved ?? {}) as { at?: number; furthest?: number };
         if (typeof at === "number") target.at = Math.min(at, target.stops.length);
         if (typeof furthest === "number") target.furthest = Math.min(furthest, target.stops.length);
-        if (target === guide) {
-          render();
-          updateMarks();
-        }
+        if (target !== guide) return;
+        render();
+        updateMarks();
+        const stop = target.stops[target.at];
+        if (stop && takePendingJump(target)) void goTo(target, stop.change);
       });
       break;
     case "error":
@@ -271,7 +274,7 @@ function renderStop(g: Guide, stop: Stop, close: HTMLElement): HTMLElement[] {
   const rows = [
     top,
     row(
-      h("button", { className: "where", title: `${stop.change.path}:${changeLines(stop.change)} · show it again`, onclick: () => goTo(g, stop.change) }, where),
+      h("button", { className: "where", title: `${stop.change.path}:${changeLines(stop.change)} · show it again`, onclick: () => void goTo(g, stop.change) }, where),
       stop.step.outsideIntent
         ? h("span", { className: "tag", title: "Neither the block's intent nor the PR description announces this change", textContent: "Unannounced" })
         : "",
@@ -279,6 +282,7 @@ function renderStop(g: Guide, stop: Stop, close: HTMLElement): HTMLElement[] {
     ),
   ];
   if (stop.step.check) rows.push(row(icon("warning"), h("span", { className: "grow check", textContent: stop.step.check })));
+  if (g.lost) rows.push(row(h("span", { className: "grow error", textContent: g.lost })));
   return rows;
 }
 
@@ -425,15 +429,16 @@ function basename(path: string): string {
 
 function go(g: Guide, at: number): void {
   g.at = Math.max(0, Math.min(at, g.stops.length));
+  g.lost = undefined;
   g.furthest = Math.max(g.furthest, g.at);
   void save(progressKey(g), { at: g.at, furthest: g.furthest });
   render();
   updateMarks();
   const stop = g.stops[g.at];
-  if (stop) goTo(g, stop.change);
+  if (stop) void goTo(g, stop.change);
 }
 
-function goTo(g: Guide, change: Change): void {
+async function goTo(g: Guide, change: Change): Promise<void> {
   const firstToRead = (side: "LEFT" | "RIGHT", start: number, count: number) => {
     for (let line = start; line < start + count; line++) {
       if (!change.proven.some((p) => p.side === side && p.line === line)) return line;
@@ -445,7 +450,18 @@ function goTo(g: Guide, change: Change): void {
     right !== undefined
       ? lineAnchor(change.fileHash, "RIGHT", right)
       : lineAnchor(change.fileHash, "LEFT", firstToRead("LEFT", change.oldStart, change.oldCount) ?? change.oldStart);
-  scrollToLine(anchor, `/${g.pr.owner}/${g.pr.repo}/pull/${g.pr.number}/files`);
+  const lost = g.lost;
+  g.lost = undefined;
+  if (lost) render();
+  // Reaching the files tab can load a new page, which ends this script: the
+  // next one finishes the jump.
+  setPendingJump(g);
+  const found = await scrollToLine(anchor, change.path, `/${g.pr.owner}/${g.pr.repo}/pull/${g.pr.number}/files`);
+  if (found === "leaving") return;
+  takePendingJump(g);
+  if (found || g.stops[g.at]?.change !== change) return;
+  g.lost = `Couldn't find ${basename(change.path)}:${changeLines(change)} in the page. If GitHub collapsed the file, expand it, then click the location.`;
+  if (g === guide) render();
 }
 
 function askAbout(stop: Stop): void {
@@ -484,6 +500,27 @@ function startedKey(pr: PrRef): string {
 // Progress belongs to one grouping of one head: a push or a regroup starts over.
 function progressKey(g: Guide): string {
   return `guide-progress ${prKey(g.pr)}@${g.triage?.headSha} ${g.stops.map((s) => s.change.id).join(",")}`;
+}
+
+// Per tab, so a jump only resumes in the tab that started it.
+const PENDING_JUMP = "review-ai-pending-jump";
+
+function setPendingJump(g: Guide): void {
+  try {
+    sessionStorage.setItem(PENDING_JUMP, prKey(g.pr));
+  } catch {
+    // Without session storage, a jump that loads a new page stops there.
+  }
+}
+
+function takePendingJump(g: Guide): boolean {
+  try {
+    const pending = sessionStorage.getItem(PENDING_JUMP) === prKey(g.pr);
+    sessionStorage.removeItem(PENDING_JUMP);
+    return pending;
+  } catch {
+    return false;
+  }
 }
 
 async function load(key: string): Promise<unknown> {

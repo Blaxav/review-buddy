@@ -63,16 +63,67 @@ export function setDocked(docked: boolean): void {
   document.documentElement.classList.toggle(DOCKED, docked);
 }
 
-// Scrolls GitHub's diff to a line; a line not rendered yet is reached through
-// the URL hash, which GitHub follows on the files tab.
-export function scrollToLine(anchor: string, filesUrl: string): void {
-  const cell = document.querySelector(`td[data-line-anchor="${anchor}"], td[id="${anchor}"]`);
-  if (cell) {
-    cell.scrollIntoView({ block: "center", behavior: "smooth" });
-  } else if (/\/pull\/\d+\/(files|changes)/.test(location.pathname)) {
-    location.hash = anchor;
-  } else {
-    location.href = `${filesUrl}#${anchor}`;
+const FILES_TAB = /\/pull\/\d+\/(files|changes)/;
+
+// Scrolls GitHub's diff to a line, in `path`. GitHub renders the diff of a file
+// only once it nears the viewport, so a line further down isn't in the page
+// yet: this brings its file into view first (opening the files tab when
+// needed), then waits for the line to render. Resolves false when the line
+// never shows up, such as in a file whose diff GitHub collapsed, and
+// "leaving" when it loads the files tab as a new page.
+export async function scrollToLine(anchor: string, path: string, filesUrl: string): Promise<boolean | "leaving"> {
+  let cell = findCell(anchor);
+  if (!cell && !FILES_TAB.test(location.pathname)) {
+    const tab = document.querySelector<HTMLElement>(`a[href$="${filesUrl}"], a[href$="${filesUrl.replace(/files$/, "changes")}"]`);
+    if (!tab) {
+      location.href = `${filesUrl}#${anchor}`;
+      return "leaving";
+    }
+    tab.click();
+    cell = await waitFor(() => findCell(anchor) ?? findFile(anchor, path), 10_000).then(() => findCell(anchor));
+  }
+  if (!cell) {
+    const file = findFile(anchor, path);
+    if (file?.matches("a, button, [role=treeitem]")) file.click();
+    else if (file) file.scrollIntoView({ block: "start" });
+    else location.hash = anchor;
+    cell = await waitFor(() => findCell(anchor), 5_000);
+  }
+  if (!cell) return false;
+  cell.scrollIntoView({ block: "center" });
+  // Rows above the line can still grow as they render: center it again once they settle.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  findCell(anchor)?.scrollIntoView({ block: "center" });
+  return true;
+}
+
+function findCell(anchor: string): HTMLElement | null {
+  return document.querySelector(`td[data-line-anchor="${anchor}"], td[id="${anchor}"]`);
+}
+
+// The file's container, or its entry in GitHub's file tree. Both views name a
+// file by `diff-<sha256 of its path>`, as in line anchors.
+function findFile(anchor: string, path: string): HTMLElement | null {
+  const file = anchor.replace(/[LR]\d+$/, "");
+  const quoted = JSON.stringify(path);
+  return document.querySelector(
+    [
+      `[id="${file}"]`,
+      `[data-tagsearch-path=${quoted}]`,
+      `[data-file-path=${quoted}]:not(copilot-diff-entry)`,
+      `[data-anchor="${file}"]`,
+      `a[href$="#${file}"]`,
+      `[id$="${file}"]`,
+    ].join(", "),
+  );
+}
+
+async function waitFor<T>(find: () => T | null, timeout: number): Promise<T | null> {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const found = find();
+    if (found || Date.now() > deadline) return found;
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
