@@ -78,16 +78,14 @@ export type Rename = { from: string; to: string };
 
 export type Triage = { headSha: string; changes: Change[]; renames: Rename[] };
 
-// Changes that belong together, in the order to read them. Every change with a
-// line left to review is in exactly one block.
-export type ReviewBlock = {
-  id: string;
-  title: string;
-  intent: string;
-  changes: string[];
-  checks: string[];
-  outsideIntent: { change: string; note: string }[];
-};
+// One stop of the smart review: changes read together, with a one-line note
+// on what they do and, only when something deserves a look, a concern.
+// `outsideIntent` flags a change the PR doesn't announce.
+export type ReviewStep = { changes: string[]; note: string; check: string; outsideIntent: boolean };
+
+// Steps that make one logical change, in the order to read them. Every change
+// with a line left to review is in exactly one step.
+export type ReviewBlock = { id: string; title: string; intent: string; steps: ReviewStep[] };
 
 export type GuideRequest = { pr: PrRef; regroup?: boolean };
 

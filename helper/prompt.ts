@@ -67,14 +67,21 @@ export const GUIDE_SCHEMA = {
         properties: {
           title: { type: "string" },
           intent: { type: "string" },
-          changes: { type: "array", items: { type: "string" } },
-          checks: { type: "array", items: { type: "string" } },
-          outside_intent: {
+          steps: {
             type: "array",
-            items: { type: "object", properties: { change: { type: "string" }, note: { type: "string" } }, required: ["change", "note"] },
+            items: {
+              type: "object",
+              properties: {
+                changes: { type: "array", items: { type: "string" } },
+                note: { type: "string" },
+                check: { type: "string" },
+                outside_intent: { type: "boolean" },
+              },
+              required: ["changes", "note", "check", "outside_intent"],
+            },
           },
         },
-        required: ["title", "intent", "changes", "checks", "outside_intent"],
+        required: ["title", "intent", "steps"],
       },
     },
   },
@@ -102,23 +109,29 @@ unchanged, consistent renames, whitespace and generated files. Below are the ${l
 each a run of changed lines with an id. Lines marked "~" in them are proven; the reviewer only reads
 the "-" and "+" lines.
 
-Sort these changes into blocks, so that the reviewer reads one block at a time instead of file by file:
-- A block is one logical change the reviewer can verify as a whole: one behaviour change, one refactoring
-  step, one new piece of a feature. Put tests in the block of the behaviour they test.
-- Order the blocks in the order to read them: types, data model and schemas first, then the core logic,
-  then its callers and wiring, then what's left (docs, tooling). Order the changes inside a block the same way.
-- A small but risky change gets its own block, however short: a config default, a migration, permissions,
-  a dependency version, error handling that swallows failures.
-- Put every change id in exactly one block.
+The reviewer walks these changes with a "Next" button: each click scrolls GitHub's diff to the next change
+and shows your note for it in a small bar. Plan that walk.
 
-For each block:
-- title: at most 8 words, saying what the block does.
-- intent: one or two sentences stating what the block claims to do. The reviewer will check the code against it.
-- checks: at most 4 specific things worth verifying, citing path:line: a likely bug, an unhandled case, an API
-  that doesn't exist or is misused, a helper that duplicates one already in the repository, a test that doesn't
-  test the behaviour. Leave it empty when nothing stands out. This is triage, not the full review.
-- outside_intent: changes in the block that do something neither the intent nor the PR description mentions,
-  with a short note on what they do. AI-written code often slips these in; they deserve the reviewer's attention.
+- Blocks: one logical change each, verifiable as a whole: one behaviour change, one refactoring step, one
+  piece of a feature. Order them for reading: types, data model and schemas first, then core logic, then
+  callers and wiring, then docs and tooling. A small but risky change gets its own block: a config default,
+  a migration, permissions, a dependency version, error handling that swallows failures.
+- Steps: inside a block, in reading order. A step holds the changes the reviewer reads together, usually
+  next to each other in one file. Put the same trivial edit repeated across files (an import path, a renamed
+  config key) in one step. Put tests right after the code they test.
+- Put every change id in exactly one step.
+
+Every word you write is read in a small bar next to the code. If reading your text takes longer than
+reading the code, it is useless: be terse, never restate the code.
+- title: at most 6 words.
+- intent: at most 15 words: what the block claims to do.
+- note: at most 12 words: what the step does or why, which the lines don't say on their own. Leave it
+  empty when the code speaks for itself.
+- check: at most 20 words, citing path:line when useful: a likely bug, an unhandled case, a misused or
+  invented API, a helper that duplicates one in the repository, a test that doesn't test the behaviour.
+  Leave it empty unless it is a real concern. This is triage, not the full review.
+- outside_intent: true when the step does something neither its block's intent nor the PR description
+  announces. AI-written code often slips these in.
 
 Use the read-only tools when a change can't be understood from its lines, but stay quick.
 

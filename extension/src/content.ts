@@ -3,7 +3,7 @@ import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
 import { setDocked } from "./diff-marks";
-import { guideView, initGuide, setGuidePr } from "./guide";
+import { guideBar, guideCss, guideStarter, initGuide, setGuideDocked, setGuidePr } from "./guide";
 import { ASK_PORT } from "./messages";
 import { icon } from "./icons";
 import css from "./overlay.css" with { type: "text" };
@@ -37,7 +37,6 @@ type Chat = { pr: PrRef; items: (Question | Answer)[]; port: Browser.Runtime.Por
 const chats = new Map<string, Chat>();
 let chat: Chat | null = null;
 let selection = "";
-let tab: "chat" | "review" = "chat";
 
 // --- Overlay skeleton -------------------------------------------------------
 
@@ -47,9 +46,6 @@ isolateEvents(root, ["keydown", "keyup", "keypress"]);
 
 const titleEl = h("span", { className: "title" });
 const body = h("div", { className: "body" });
-const chatTab = h("button", { className: "tab", textContent: "Chat", onclick: () => setTab("chat") });
-const reviewTab = h("button", { className: "tab", textContent: "Smart review", onclick: () => setTab("review") });
-const newChatButton = h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat"));
 const panel = h(
   "div",
   { className: "panel", hidden: true },
@@ -58,10 +54,9 @@ const panel = h(
     { className: "header" },
     h("span", { className: "mark" }, icon("sparkle")),
     h("div", { className: "heading" }, h("span", { className: "name", textContent: "Claude" }), titleEl),
-    newChatButton,
+    h("button", { className: "icon-button", title: "New chat", ariaLabel: "New chat", onclick: () => void newChat() }, icon("newChat")),
     h("button", { className: "icon-button", title: "Close (Esc)", ariaLabel: "Close", onclick: () => setPanelOpen(false) }, icon("close")),
   ),
-  h("div", { className: "tabs", role: "tablist" }, chatTab, reviewTab),
   body,
 );
 const launcher = h(
@@ -69,7 +64,7 @@ const launcher = h(
   { className: "launcher", title: "Ask Claude about this PR", ariaLabel: "Ask Claude", onclick: () => void setPanelOpen(true) },
   icon("sparkle"),
 );
-root.append(h("style", { textContent: theme + css }), panel, launcher);
+root.append(h("style", { textContent: theme + css + guideCss }), panel, launcher, guideStarter, guideBar);
 panel.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setPanelOpen(false);
 });
@@ -102,20 +97,16 @@ async function setPanelOpen(open: boolean): Promise<void> {
   panel.hidden = !open;
   launcher.hidden = open;
   setDocked(open);
+  setGuideDocked(open);
   if (!open) return;
   await connect();
-  if (tab === "chat") input.focus();
-}
-
-function setTab(next: "chat" | "review"): void {
-  tab = next;
-  void connect();
+  input.focus();
 }
 
 async function connect(): Promise<void> {
   const res = await request({ kind: "check" });
   if (res.ok) {
-    renderBody();
+    renderChat();
     warm();
   } else {
     renderConnectionError(res.error);
@@ -133,16 +124,8 @@ function renderConnectionError(error: string): void {
   );
 }
 
-function renderBody(): void {
-  chatTab.ariaSelected = String(tab === "chat");
-  reviewTab.ariaSelected = String(tab === "review");
-  newChatButton.hidden = tab !== "chat";
-  if (tab === "review") body.replaceChildren(guideView);
-  else renderChat();
-}
-
 function renderChat(): void {
-  if (!chat || tab !== "chat") return;
+  if (!chat) return;
   body.replaceChildren(messagesEl, composer);
   if (chat.items.length === 0) {
     messagesEl.replaceChildren(
@@ -401,10 +384,9 @@ function sync(): void {
   if (!panel.hidden) void connect();
 }
 
-// A question about a block of the smart review goes to the chat.
-initGuide((question, label) => {
-  tab = "chat";
-  renderBody();
+// A question about a step of the smart review goes to the chat.
+initGuide(async (question, label) => {
+  await setPanelOpen(true);
   ask(question, label);
 });
 sync();

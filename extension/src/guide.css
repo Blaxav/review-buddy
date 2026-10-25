@@ -1,0 +1,158 @@
+/* The smart review: a pill to start it, then a bar at the bottom of the page. */
+
+.starter {
+  position: fixed;
+  right: 84px;
+  bottom: 30px;
+  z-index: 2147483000;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  background: var(--bg);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.1), 0 8px 24px rgb(0 0 0 / 0.1);
+}
+.starter:hover { background: var(--bg); transform: translateY(-1px); }
+.starter .icon { color: var(--claude); }
+
+.review-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 2147483000;
+  width: min(720px, calc(100vw - 200px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 8px 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1), 0 16px 40px rgb(0 0 0 / 0.14);
+  font-size: 13px;
+  animation: bar-in 0.18s ease-out;
+}
+@keyframes bar-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+/* Beside the chat panel, the bar centres on what's left of the page. */
+.review-bar.docked { left: calc((100vw - 452px) / 2); width: min(720px, calc(100vw - 520px)); }
+
+.review-bar .row { display: flex; align-items: center; gap: 8px; min-height: 28px; min-width: 0; }
+.review-bar .grow { flex: 1; min-width: 0; }
+.review-bar .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-bar .muted { color: var(--fg-muted); font-weight: 400; white-space: nowrap; }
+.review-bar .mark .icon { display: block; }
+.review-bar .icon-button { padding: 5px; }
+.review-bar .icon-button.active { background: var(--bg-muted); color: var(--fg); }
+.review-bar button.next { padding: 4px 8px 4px 14px; gap: 2px; }
+.review-bar button.next .icon { width: 14px; height: 14px; }
+.review-bar .status { margin-top: 1px; }
+
+.counter {
+  flex-shrink: 0;
+  min-width: 34px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--claude);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.done-mark { color: var(--success); display: inline-flex; }
+
+/* The second row: where the change is, and Claude's one-line note. */
+.where {
+  flex-shrink: 0;
+  max-width: 40%;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--bg-muted);
+  font: 12px var(--mono);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+.where:hover { background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.note { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg));
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+}
+.review-bar .row > .icon-warning { color: var(--danger); margin-left: 2px; }
+.check { color: var(--fg); }
+
+/* The outline opens above the bar. */
+.outline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1), 0 16px 40px rgb(0 0 0 / 0.14);
+}
+
+.summary { display: flex; flex-direction: column; gap: 8px; }
+.summary .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 2px; background: var(--border-muted); }
+.summary .seg { min-width: 3px; }
+.summary .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--fg-muted); }
+.summary .legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.seg.review, .dot.review { background: var(--claude); }
+.seg.moved, .dot.moved { background: color-mix(in srgb, var(--fg-muted) 70%, var(--bg)); }
+.seg.renamed, .dot.renamed { background: color-mix(in srgb, var(--fg-muted) 50%, var(--bg)); }
+.seg.whitespace, .dot.whitespace { background: color-mix(in srgb, var(--fg-muted) 32%, var(--bg)); }
+.seg.generated, .dot.generated { background: color-mix(in srgb, var(--fg-muted) 18%, var(--bg)); }
+.toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); cursor: pointer; }
+.toggle input { margin: 0; accent-color: var(--claude); }
+
+.outline-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+.outline-head button { padding: 4px; }
+.outline-block { width: 100%; justify-content: flex-start; gap: 10px; border: 0; border-radius: 10px; background: none; padding: 6px 8px; text-align: left; }
+.outline-block:hover { background: var(--bg-muted); }
+.outline-block.current { background: var(--claude-soft); }
+.outline-block .grow { display: flex; flex-direction: column; }
+.outline-block .block-title { font-weight: 600; }
+.outline-block.walked .block-title { color: var(--fg-muted); font-weight: 500; }
+.outline-block small { font-size: 12px; font-weight: 400; color: var(--fg-muted); }
+.outline-block .muted { font-size: 12px; }
+.outline-block .num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.outline-block.current .num { background: var(--claude); color: #ffffff; }
+.outline-block.walked .num { background: color-mix(in srgb, var(--success) 14%, var(--bg)); color: var(--success); }
+.outline-block .num .icon { width: 12px; height: 12px; }
+
+.proof { font-size: 12px; color: var(--fg-muted); }
+.proof summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.proof summary::-webkit-details-marker { display: none; }
+.proof summary .icon { width: 12px; height: 12px; transition: transform 0.15s; }
+.proof[open] summary .icon { transform: rotate(90deg); }
+.proof summary:hover { color: var(--fg); }
+.proof-title { font-weight: 600; color: var(--fg); margin: 10px 0 2px; }
+.proof ul { margin: 4px 0 0; padding-left: 16px; }
+.proof li { font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

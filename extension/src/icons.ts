@@ -6,6 +6,8 @@ const PATHS = {
   send: { stroke: "M8 13V3.5M3.75 7.5 8 3.25l4.25 4.25" },
   stop: { fill: "M5 4h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" },
   chevron: { stroke: "M6 3.75 10.25 8 6 12.25" },
+  back: { stroke: "M10 3.75 5.75 8 10 12.25" },
+  list: { stroke: "M5.5 4h8M5.5 8h8M5.5 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01" },
   file: { stroke: "M9 1.75H4.5a1 1 0 0 0-1 1v10.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-8M9 1.75v3.5h3.5M9 1.75l3.5 3.5" },
   check: { stroke: "M3 8.5 6.25 11.75 13 5" },
   insert: { stroke: "M8 2v8M4.75 6.75 8 10l3.25-3.25M3 13.5h10" },

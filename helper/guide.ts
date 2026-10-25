@@ -8,7 +8,8 @@ import { GUIDE_SCHEMA, guidePrompt } from "./prompt";
 import { ALLOWED_TOOLS, getLatestCheckout } from "./session";
 import { classify, isLockfile, parseChanges, type RawChange } from "./triage";
 
-const GUIDES_DIR = join(HOME_DIR, "guides");
+// Versioned: a saved guide in an older shape is grouped again.
+const GUIDES_DIR = join(HOME_DIR, "guides", "v2");
 
 type Triaged = { triage: Triage; raw: RawChange[] };
 
@@ -192,43 +193,38 @@ async function groupChanges(pr: PrRef, checkout: Checkout, triage: Triage, raw: 
   return assembleBlocks(output, triage);
 }
 
-// Keeps Claude's blocks honest: only changes with lines left to review, each in
-// one block; whatever Claude left out goes to a last block, so nothing is hidden.
+// Keeps Claude's walk honest: only changes with lines left to review, each in
+// one step; whatever Claude left out goes to a last block, so nothing is hidden.
 export function assembleBlocks(output: unknown, triage: Triage): ReviewBlock[] {
   const toReview = new Set(triage.changes.filter((change) => linesToReview(change) > 0).map((change) => change.id));
   const assigned = new Set<string>();
   const blocks: ReviewBlock[] = [];
-  const list = (output as { blocks?: unknown })?.blocks;
-  for (const item of Array.isArray(list) ? list : []) {
+  for (const item of list((output as { blocks?: unknown })?.blocks)) {
     const block = (item ?? {}) as Record<string, unknown>;
-    const changes = strings(block.changes).filter((id) => toReview.has(id) && !assigned.has(id));
-    if (changes.length === 0) continue;
-    for (const id of changes) assigned.add(id);
-    const outside = Array.isArray(block.outside_intent) ? block.outside_intent : [];
-    blocks.push({
-      id: `b${blocks.length + 1}`,
-      title: text(block.title) || "Untitled block",
-      intent: text(block.intent),
-      changes,
-      checks: strings(block.checks),
-      outsideIntent: outside.flatMap((entry) => {
-        const { change, note } = (entry ?? {}) as Record<string, unknown>;
-        return typeof change === "string" && changes.includes(change) && text(note) ? [{ change, note: text(note) }] : [];
-      }),
+    const steps = list(block.steps).flatMap((entry) => {
+      const step = (entry ?? {}) as Record<string, unknown>;
+      const changes = strings(step.changes).filter((id) => toReview.has(id) && !assigned.has(id));
+      if (changes.length === 0) return [];
+      for (const id of changes) assigned.add(id);
+      return [{ changes, note: text(step.note), check: text(step.check), outsideIntent: step.outside_intent === true }];
     });
+    if (steps.length === 0) continue;
+    blocks.push({ id: `b${blocks.length + 1}`, title: text(block.title) || "Untitled block", intent: text(block.intent), steps });
   }
   const left = [...toReview].filter((id) => !assigned.has(id));
   if (left.length > 0) {
     blocks.push({
       id: `b${blocks.length + 1}`,
-      title: "Changes left out of the blocks",
-      intent: "Claude didn't place these changes in a block. Review them on their own.",
-      changes: left,
-      checks: [],
-      outsideIntent: [],
+      title: "Left out of the blocks",
+      intent: "Claude didn't place these changes. Review them on their own.",
+      steps: left.map((id) => ({ changes: [id], note: "", check: "", outsideIntent: false })),
     });
   }
   return blocks;
+}
+
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function text(value: unknown): string {
