@@ -14,6 +14,8 @@ const PATHS = {
   blocks: { stroke: "M2.75 2.75h4v4h-4zM9.25 2.75h4v4h-4zM2.75 9.25h4v4h-4zM9.25 9.25h4v4h-4z" },
   refresh: { stroke: "M13.25 8A5.25 5.25 0 1 1 11.7 4.3M13.25 2.5v3h-3" },
   warning: { stroke: "M8 2 14.5 13.5h-13L8 2ZM8 6.5v3M8 11.5v.01" },
+  minimize: { stroke: "M4 8h8" },
+  comment: { stroke: "M2.75 3.25a1 1 0 0 1 1-1h8.5a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H7l-3 2.5v-2.5h-.25a1 1 0 0 1-1-1v-6.5Z" },
 } as const;
 
 export type IconName = keyof typeof PATHS;

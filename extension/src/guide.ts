@@ -15,26 +15,28 @@ import {
   type Triage,
 } from "../../shared/protocol";
 import { lineAnchor, scrollToLine, setMarks } from "./diff-marks";
-import { focusInNote, setNotes, type DiffNote } from "./diff-notes";
+import { setNotes, type DiffNote } from "./diff-notes";
 import css from "./guide.css" with { type: "text" };
 import { icon, type IconName } from "./icons";
 import { GUIDE_PORT } from "./messages";
 import noteCss from "./note.css" with { type: "text" };
+import { basename, PlaceCard, prose } from "./place-card";
 import theme from "./theme.css" with { type: "text" };
 import { h } from "./ui";
 
 // The smart review extends a manual review of GitHub's diff. Claude's notes
 // sit in the diff itself, in a card under the lines they are about, and the
 // walk goes from one place worth checking to the next: Next scrolls the diff
-// there and opens its card. Mechanical steps get a one-line note in the diff
-// and no stop. A small bar keeps the walk in reach while the reader scrolls,
-// and opens an overview of the whole PR.
+// there and opens its card, where the reviewer can talk with Claude about the
+// lines, comment on them, and mark the place checked. Mechanical steps get a
+// one-line note in the diff and no stop. A small bar keeps the walk in reach
+// while the reader scrolls, and opens an overview of the whole PR.
 
 export const guideCss = css;
 
 // A place worth checking: a step that isn't mechanical, or that the briefing
 // asks to read closely. `anchor` is the change its note is about.
-type Stop = { block: ReviewBlock; step: ReviewStep; anchor: Change; focus?: FocusPoint; firstOfBlock: boolean };
+type Stop = { block: ReviewBlock; step: ReviewStep; anchor: Change; focus?: FocusPoint; card: PlaceCard };
 
 type Guide = {
   pr: PrRef;
@@ -46,7 +48,10 @@ type Guide = {
   stops: Stop[];
   // The stop shown: -1 before the first, stops.length once past the last.
   at: number;
-  furthest: number;
+  // The anchors of the places marked checked.
+  checked: Set<string>;
+  // The current place's card is folded to one line.
+  minimized: boolean;
   overview: boolean;
   // Set when the current place couldn't be found in the page.
   lost?: string;
@@ -65,7 +70,6 @@ const NOTE_CSS = theme + noteCss;
 const guides = new Map<string, Guide>();
 let guide: Guide | null = null;
 let dim = true;
-let askClaude: (question: string, label: string) => void = () => {};
 
 export const guideStarter = h(
   "button",
@@ -85,9 +89,7 @@ guideBar.setAttribute("aria-label", "Smart review");
 export const guideLive = h("div", { className: "visually-hidden" });
 guideLive.setAttribute("aria-live", "polite");
 
-// `ask` opens the chat on a question about a change.
-export function initGuide(ask: (question: string, label: string) => void): void {
-  askClaude = ask;
+export function initGuide(): void {
   document.addEventListener("keydown", onKey, true);
 }
 
@@ -126,7 +128,7 @@ export function setGuidePr(pr: PrRef | null): void {
   const key = prKey(pr);
   if (guide && prKey(guide.pr) === key) return;
   const existing = guides.get(key);
-  guide = existing ?? { pr, phase: "idle", stops: [], at: -1, furthest: -1, overview: false, port: null };
+  guide = existing ?? { pr, phase: "idle", stops: [], at: -1, checked: new Set(), minimized: false, overview: false, port: null };
   guides.set(key, guide);
   render();
   if (!existing) {
@@ -147,7 +149,8 @@ function start(target: Guide, regroup: boolean): void {
     review: undefined,
     stops: [],
     at: -1,
-    furthest: -1,
+    checked: new Set(),
+    minimized: false,
     overview: false,
   });
   void save(startedKey(target.pr), true);
@@ -163,7 +166,7 @@ function start(target: Guide, regroup: boolean): void {
 
 function end(target: Guide): void {
   target.port?.disconnect();
-  Object.assign(target, { phase: "idle", port: null, triage: undefined, review: undefined, stops: [], at: -1, furthest: -1, overview: false });
+  Object.assign(target, { phase: "idle", port: null, triage: undefined, review: undefined, stops: [], at: -1, checked: new Set(), minimized: false, overview: false });
   void save(startedKey(target.pr), false);
   if (target === guide) render();
 }
@@ -181,13 +184,13 @@ function onEvent(target: Guide, event: GuideEvent): void {
       break;
     case "guide":
       target.review = event.guide;
-      target.stops = walk(event.guide, target.triage!);
+      target.stops = walk(target, event.guide, target.triage!);
       target.phase = "done";
       finish(target);
       void load(progressKey(target)).then((saved) => {
-        const { at, furthest } = (saved ?? {}) as { at?: number; furthest?: number };
+        const { at, checked } = (saved ?? {}) as { at?: number; checked?: string[] };
         if (typeof at === "number") target.at = Math.min(at, target.stops.length);
-        if (typeof furthest === "number") target.furthest = Math.min(furthest, target.stops.length);
+        if (Array.isArray(checked)) target.checked = new Set(checked);
         // A first look opens on the briefing.
         target.overview = target.at < 0;
         if (target !== guide) return;
@@ -211,19 +214,49 @@ function finish(target: Guide): void {
   target.port = null;
 }
 
-function walk(review: ReviewGuide, triage: Triage): Stop[] {
+function walk(g: Guide, review: ReviewGuide, triage: Triage): Stop[] {
   const changes = new Map(triage.changes.map((change) => [change.id, change]));
-  return review.blocks.flatMap((block) => {
+  const stops: Stop[] = [];
+  for (const block of review.blocks) {
     let first = true;
-    return block.steps.flatMap((step) => {
+    for (const step of block.steps) {
       const anchor = changes.get(step.anchor);
       const focus = review.focus.find((point) => step.changes.includes(point.change));
-      if (!anchor || (step.skim && !focus)) return [];
-      const stop = { block, step, anchor, focus, firstOfBlock: first };
+      if (!anchor || (step.skim && !focus)) continue;
+      // The step's other changes: those in the anchor's file carry the same
+      // bar in the diff, so the card counts them; the others get a link.
+      const others = step.changes.filter((id) => id !== anchor.id).map((id) => changes.get(id)!).filter((change) => !change.importsOnly);
+      const at = stops.length;
+      const card = new PlaceCard(
+        {
+          pr: g.pr,
+          anchor,
+          title: block.title,
+          intent: first ? block.intent : "",
+          note: step.note,
+          verify: focus?.why ?? "",
+          concern: step.check,
+          outsideIntent: step.outsideIntent,
+          here: others.filter((change) => change.path === anchor.path).length,
+          elsewhere: [...new Map(others.filter((change) => change.path !== anchor.path).map((change) => [change.path, change])).values()],
+        },
+        {
+          open: () => go(g, at, false, false),
+          minimize: () => {
+            g.minimized = true;
+            render();
+          },
+          setChecked: (checked) => setChecked(g, at, checked),
+          previous: () => go(g, at - 1, true),
+          next: () => go(g, at + 1, true),
+          jump: (change) => void jump(g, change),
+        },
+      );
+      stops.push({ block, step, anchor, focus, card });
       first = false;
-      return [stop];
-    });
-  });
+    }
+  }
+  return stops;
 }
 
 function render(): void {
@@ -272,7 +305,10 @@ function barTitle(g: Guide): (Node | string)[] {
   const total = g.stops.length;
   if (total === 0) return ["Nothing stands out", muted(" · the notes in the diff cover the rest")];
   if (g.at < 0) return ["Smart review", muted(` · ${total} place${total === 1 ? "" : "s"} worth checking`)];
-  if (g.at >= total) return ["Checked all places", muted(` · ${total} of ${total}`)];
+  if (g.at >= total) {
+    const left = total - g.checked.size;
+    return left === 0 ? ["All places checked", muted(` · ${total} of ${total}`)] : ["End of the walk", muted(` · ${left} not checked yet`)];
+  }
   const stop = g.stops[g.at]!;
   return [h("span", { className: "position", textContent: `${g.at + 1} of ${total}` }), " ", stop.block.title];
 }
@@ -282,7 +318,10 @@ function walkButtons(g: Guide): HTMLElement[] {
   if (total === 0) return [];
   if (g.at < 0) return [h("button", { className: "primary next", title: "Go to the first place (])", onclick: () => go(g, 0) }, "Start", icon("chevron"))];
   const back = iconButton("back", "Previous place ([)", () => go(g, g.at - 1), g.at === 0);
-  if (g.at >= total) return [back, h("button", { textContent: "From the start", onclick: () => go(g, 0) })];
+  if (g.at >= total) {
+    const unchecked = g.stops.findIndex((stop) => !g.checked.has(stop.anchor.id));
+    return [back, h("button", { textContent: unchecked < 0 ? "From the start" : "First not checked", onclick: () => go(g, Math.max(unchecked, 0)) })];
+  }
   return [back, h("button", { className: "primary next", title: "Next place (])", onclick: () => go(g, g.at + 1) }, g.at === total - 1 ? "Finish" : "Next", icon("chevron"))];
 }
 
@@ -305,7 +344,7 @@ function renderOverview(g: Guide): HTMLElement {
   if (review.summary) overview.append(h("p", { className: "summary-text" }, ...prose(review.summary)));
   if (g.stops.length > 0) {
     overview.append(
-      h("div", { className: "section-head", textContent: "Worth checking" }),
+      h("div", { className: "section-head" }, "Worth checking", muted(` · ${g.checked.size} of ${g.stops.length} checked`)),
       h(
         "ol",
         { className: "places" },
@@ -316,10 +355,10 @@ function renderOverview(g: Guide): HTMLElement {
             h(
               "button",
               {
-                className: `place${i === g.at ? " current" : ""}${i < g.furthest && i !== g.at ? " walked" : ""}`,
+                className: `place${i === g.at ? " current" : ""}${g.checked.has(stop.anchor.id) ? " checked" : ""}`,
                 onclick: () => go(g, i),
               },
-              h("span", { className: "num" }, i < g.furthest && i !== g.at ? icon("check") : String(i + 1)),
+              h("span", { className: "num" }, g.checked.has(stop.anchor.id) ? icon("check") : String(i + 1)),
               h(
                 "span",
                 { className: "grow" },
@@ -444,14 +483,14 @@ function renderProof(triage: Triage): HTMLElement {
 // --- Notes in the diff ------------------------------------------------------------
 
 // Every step gets a note under its lines: the current place opens in a card,
-// the other places show one line to open them, and mechanical steps a quiet
+// the other places show one line that opens them, and mechanical steps a quiet
 // line saying so.
 function renderNotes(): void {
   const g = guide;
   if (!g || g.phase !== "done") return setNotes([], NOTE_CSS);
-  const notes: DiffNote[] = [];
-  g.stops.forEach((stop, i) => {
-    notes.push({ key: stop.anchor.id, after: lastLine(stop.anchor), content: i === g.at ? openCard(g, stop, i) : closedCard(g, stop, i) });
+  const notes: DiffNote[] = g.stops.map((stop, i) => {
+    stop.card.update({ position: i + 1, total: g.stops.length, open: i === g.at && !g.minimized, checked: g.checked.has(stop.anchor.id) });
+    return { key: stop.anchor.id, after: lastLine(stop.anchor), content: stop.card.el };
   });
   for (const { step, anchor } of skimSteps(g)) {
     notes.push({
@@ -461,72 +500,6 @@ function renderNotes(): void {
     });
   }
   setNotes(notes, NOTE_CSS);
-}
-
-function openCard(g: Guide, stop: Stop, i: number): HTMLElement {
-  const { block, step, focus } = stop;
-  const total = g.stops.length;
-  const card = h(
-    "section",
-    { className: "card open" },
-    h(
-      "header",
-      {},
-      mark(),
-      h("span", { className: "position", textContent: `${i + 1} of ${total}` }),
-      h("span", { className: "grow card-title", textContent: block.title }),
-      focus ? h("span", { className: "tag focus", textContent: "Look closely" }) : "",
-      step.outsideIntent ? h("span", { className: "tag", title: "Neither its block nor the PR description announces this change", textContent: "Not in the PR description" }) : "",
-      h("button", { className: "ghost", title: "Ask Claude about these lines", onclick: () => askAbout(g, stop) }, icon("sparkle"), "Ask Claude"),
-    ),
-  );
-  card.setAttribute("aria-label", `Smart review, place ${i + 1} of ${total}: ${block.title}`);
-  if (stop.firstOfBlock && block.intent) card.append(h("p", { className: "intent" }, ...prose(block.intent)));
-  if (step.note) card.append(h("p", { className: "note" }, ...prose(step.note)));
-  if (focus) card.append(line("verify", "Verify", focus.why));
-  if (step.check) card.append(line("concern", "Concern", step.check, "warning"));
-  // The step's other changes: those in this file carry the same bar in the
-  // diff, so they are counted; those in other files get a link.
-  const others = step.changes
-    .filter((id) => id !== stop.anchor.id)
-    .map((id) => g.triage!.changes.find((change) => change.id === id)!)
-    .filter((change) => !change.importsOnly);
-  const here = others.filter((change) => change.path === stop.anchor.path).length;
-  const elsewhere = [...new Map(others.filter((change) => change.path !== stop.anchor.path).map((change) => [change.path, change])).values()];
-  if (here + elsewhere.length > 0) {
-    const parts: (Node | string)[] = [];
-    if (here > 0) parts.push(`${here} more change${here === 1 ? "" : "s"} in this file, marked in the margin`);
-    if (elsewhere.length > 0) {
-      parts.push(here > 0 ? "; also " : "Also ");
-      elsewhere.forEach((change, k) => {
-        if (k > 0) parts.push(", ");
-        parts.push(h("button", { className: "link", title: `Show ${change.path}`, onclick: () => void jump(g, change) }, basename(change.path)));
-      });
-    }
-    card.append(h("p", { className: "related" }, ...parts, "."));
-  }
-  const back = h("button", { textContent: "Previous", disabled: i === 0, onclick: () => go(g, i - 1, true) });
-  const next = h("button", { className: "primary", onclick: () => go(g, i + 1, true) }, i === total - 1 ? "Finish" : "Next", icon("chevron"));
-  next.dataset.key = "next";
-  back.dataset.key = "back";
-  card.append(h("footer", {}, h("span", { className: "grow hint", textContent: "] next · [ previous" }), back, next));
-  return card;
-}
-
-function closedCard(g: Guide, stop: Stop, i: number): HTMLElement {
-  return h(
-    "button",
-    { className: `card closed${i < g.furthest ? " walked" : ""}`, title: "Open this place", onclick: () => go(g, i, false, false) },
-    mark(),
-    h("span", { className: "position", textContent: `${i + 1} of ${g.stops.length}` }),
-    h("span", { className: "card-title", textContent: stop.block.title }),
-    h("span", { className: "grow summary-line" }, ...prose(stop.step.note)),
-    stop.step.check ? icon("warning") : "",
-  );
-}
-
-function line(kind: string, label: string, text: string, iconName?: IconName): HTMLElement {
-  return h("p", { className: `line ${kind}` }, h("span", { className: "label" }, iconName ? icon(iconName) : "", label), h("span", {}, ...prose(text)));
 }
 
 // The line a change's note goes under: its last added line, or its last removed one.
@@ -542,16 +515,7 @@ function linesLabel(change: Change): string {
   return count > 1 ? `${basename(change.path)}, lines ${start}–${start + count - 1}` : `${basename(change.path)}, line ${start}`;
 }
 
-function basename(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
 // --- Shared parts -------------------------------------------------------------------
-
-// Claude's text, with its `code` spans set in code.
-function prose(text: string): (Node | string)[] {
-  return text.split(/`([^`]+)`/).map((part, i) => (i % 2 === 1 ? h("code", { textContent: part }) : part));
-}
 
 function mark(): HTMLElement {
   return h("span", { className: "mark" }, icon("sparkle"));
@@ -580,14 +544,34 @@ function go(g: Guide, at: number, fromCard = false, scroll = true): void {
   g.at = Math.max(0, Math.min(at, g.stops.length));
   g.lost = undefined;
   g.overview = false;
-  g.furthest = Math.max(g.furthest, g.at);
-  void save(progressKey(g), { at: g.at, furthest: g.furthest });
+  g.minimized = false;
+  saveProgress(g);
   render();
   const stop = g.stops[g.at];
-  guideLive.textContent = stop ? `Place ${g.at + 1} of ${g.stops.length}: ${stop.block.title}` : `Checked all ${g.stops.length} places`;
+  guideLive.textContent = stop ? `Place ${g.at + 1} of ${g.stops.length}: ${stop.block.title}` : "End of the walk";
   if (!stop) return;
-  if (fromCard) focusInNote(stop.anchor.id, "[data-key='next']");
+  if (fromCard) stop.card.focus(g.checked.has(stop.anchor.id) ? "[data-key='next']" : "[data-key='check']");
   if (scroll) void goTo(g, stop.anchor);
+}
+
+// Checking a place folds its card and moves on to the next place not checked
+// yet; the folded card stays in the diff, to open again.
+function setChecked(g: Guide, at: number, checked: boolean): void {
+  const id = g.stops[at]!.anchor.id;
+  if (!checked) {
+    g.checked.delete(id);
+    saveProgress(g);
+    render();
+    return;
+  }
+  g.checked.add(id);
+  const after = [...g.stops.keys()].slice(at + 1).concat([...g.stops.keys()].slice(0, at));
+  const next = after.find((i) => !g.checked.has(g.stops[i]!.anchor.id));
+  go(g, next ?? g.stops.length, true);
+}
+
+function saveProgress(g: Guide): void {
+  void save(progressKey(g), { at: g.at, checked: [...g.checked] });
 }
 
 // Scrolls to a change without moving the walk.
@@ -624,18 +608,6 @@ async function goTo(g: Guide, change: Change): Promise<void> {
   if (found) return;
   g.lost = `${linesLabel(change)} isn't in the page: GitHub may have collapsed ${change.path}. Expand it, then press Next again.`;
   if (g === guide) renderBar();
-}
-
-function askAbout(g: Guide, stop: Stop): void {
-  const where = stop.step.changes
-    .map((id) => g.triage!.changes.find((change) => change.id === id)!)
-    .map((change) => `${change.path}:${change.newCount > 0 ? change.newStart : change.oldStart}`)
-    .join(", ");
-  askClaude(
-    `Explain the change at ${where}, part of "${stop.block.title}" (${stop.block.intent}). ` +
-      "Say briefly what it does and whether anything is wrong with it.",
-    `Explain: ${stop.block.title}`,
-  );
 }
 
 // Proven lines are dimmed, and the lines of the current place carry a bar.

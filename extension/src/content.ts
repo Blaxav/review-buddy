@@ -384,11 +384,7 @@ function sync(): void {
   if (!panel.hidden) void connect();
 }
 
-// A question about a step of the smart review goes to the chat.
-initGuide(async (question, label) => {
-  await setPanelOpen(true);
-  ask(question, label);
-});
+initGuide();
 sync();
 setInterval(sync, 500);
 watchCommentBoxes();

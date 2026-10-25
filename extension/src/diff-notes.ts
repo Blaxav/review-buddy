@@ -43,11 +43,6 @@ export function setNotes(next: DiffNote[], css: string): void {
   }
 }
 
-// Focuses an element of a note's card, without scrolling to it.
-export function focusInNote(key: string, selector: string): void {
-  rows.get(key)?.root.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
-}
-
 function place(): void {
   for (const note of notes) {
     const entry = rows.get(note.key) ?? create(note.key);

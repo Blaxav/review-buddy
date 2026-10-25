@@ -1,50 +1,21 @@
 import { commentFromAnswer, stripDraftComments } from "../../shared/drafts";
-import { prKey, type AskRequest, type LineSelection, type PrRef, type StreamEvent } from "../../shared/protocol";
+import { prKey, type LineSelection, type PrRef } from "../../shared/protocol";
 import { selectionFromAnchors, selectionKey } from "../../shared/selection";
 import css from "./comment-box.css" with { type: "text" };
 import { icon } from "./icons";
-import { ASK_PORT } from "./messages";
+import { CHECK_PROMPT, DRAFT_PROMPT, EXPLAIN_PROMPT, improvePrompt, LineChat, type Turn } from "./line-chat";
 import { parsePrPath } from "./pr-path";
 import theme from "./theme.css" with { type: "text" };
-import { autoGrow, h, isolateEvents, renderMarkdown, request } from "./ui";
-import type Browser from "webextension-polyfill";
+import { autoGrow, h, isolateEvents, renderMarkdown } from "./ui";
 
 // GitHub's box for a new review comment on the lines selected in the diff.
 const BOX = '[data-marker-id="new-comment"]';
 const STRIP = "review-ai-strip";
 
-const EXPLAIN_PROMPT = "Explain what these lines do and why they changed.";
-const CHECK_PROMPT = "Is anything wrong with these lines? Check how they're used elsewhere in the repository.";
-const WRITE_RULES =
-  "Reply with only the comment body in Markdown: no preamble and no review-comments block. " +
-  "When you propose replacement code for exactly the selected lines, put it in a ```suggestion block.";
-const DRAFT_PROMPT = `Write the review comment on the selected lines, based on what we discussed. Keep it short and specific. ${WRITE_RULES}`;
-
-function improvePrompt(comment: string): string {
-  return `Here is my draft review comment on these lines:\n<draft>\n${comment}\n</draft>\n\nRewrite it to be clear, specific and kind, keeping my intent, and correct anything it gets wrong about the code. ${WRITE_RULES}`;
-}
-
-type Turn = {
-  label: string;
-  answer: string;
-  status?: string;
-  error?: string;
-  streaming: boolean;
-  // Claude's text after a tool call starts a new paragraph.
-  breakBeforeText: boolean;
-  // The answer is the comment: write it into GitHub's box when it completes.
-  fill: boolean;
-};
-
 // The conversation about one range of lines. It outlives the box: GitHub
 // unmounts diff rows scrolled out of view, and the box can be closed and reopened.
 type BoxChat = {
-  pr: PrRef;
-  selection: LineSelection;
-  turns: Turn[];
-  port: Browser.Runtime.Port | null;
-  warmed: boolean;
-  error?: string;
+  line: LineChat;
   box: Element;
   turnsEl: HTMLElement;
   sendButton: HTMLButtonElement;
@@ -103,16 +74,28 @@ function mount(pr: PrRef, box: Element): void {
   const sendButton = h("button", { className: "send", ariaLabel: "Ask" });
   const turnsEl = h("div", { className: "turns" });
   const key = `${prKey(pr)} ${selectionKey(selection)}`;
-  const chat: BoxChat = chats.get(key) ?? { pr, selection, turns: [], port: null, warmed: false, box, turnsEl, sendButton };
-  Object.assign(chat, { box, turnsEl, sendButton });
-  chats.set(key, chat);
+  let chat = chats.get(key);
+  if (chat) {
+    Object.assign(chat, { box, turnsEl, sendButton });
+  } else {
+    const created: BoxChat = {
+      line: new LineChat(pr, selection, () => scheduleRender(created), (comment) => fillComment(created, comment)),
+      box,
+      turnsEl,
+      sendButton,
+    };
+    chat = created;
+    chats.set(key, chat);
+  }
+  const current = chat;
+  const ask = (question: string, label: string, fill: boolean) => current.line.ask(question, label, fill);
 
   const submit = () => {
     const text = input.value.trim();
-    if (!text || chat.port) return;
+    if (!text || current.line.busy) return;
     input.value = "";
     resizeInput();
-    ask(chat, text, text, false);
+    ask(text, text, false);
   };
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -120,7 +103,7 @@ function mount(pr: PrRef, box: Element): void {
       submit();
     }
   });
-  sendButton.onclick = () => (chat.port ? void request({ kind: "stop", pr, selection }) : submit());
+  sendButton.onclick = () => (current.line.busy ? current.line.stop() : submit());
 
   const chip = (label: string, title: string, run: () => void, className = "chip") =>
     h("button", { className, textContent: label, title, onclick: run });
@@ -133,83 +116,24 @@ function mount(pr: PrRef, box: Element): void {
         "div",
         { className: "bar" },
         h("span", { className: "brand" }, h("span", { className: "mark" }, icon("sparkle")), "Claude"),
-        chip("Explain", "Explain these lines", () => ask(chat, EXPLAIN_PROMPT, "Explain", false)),
-        chip("Find problems", "Look for bugs in these lines", () => ask(chat, CHECK_PROMPT, "Find problems", false)),
-        chip("Draft comment", "Write the comment from the conversation", () => ask(chat, DRAFT_PROMPT, "Draft comment", true), "chip key"),
-        chip("Improve my comment", "Rewrite what you typed below", () => improve(chat)),
+        chip("Explain", "Explain these lines", () => ask(EXPLAIN_PROMPT, "Explain", false)),
+        chip("Find problems", "Look for bugs in these lines", () => ask(CHECK_PROMPT, "Find problems", false)),
+        chip("Draft comment", "Write the comment from the conversation", () => ask(DRAFT_PROMPT, "Draft comment", true), "chip key"),
+        chip("Improve my comment", "Rewrite what you typed below", () => improve(current)),
       ),
       turnsEl,
       h("div", { className: "ask" }, h("div", { className: "input-box" }, input, sendButton)),
     ),
   );
   box.prepend(host);
-  render(chat);
-  warm(chat);
-}
-
-// Starts this range's Claude process while the reviewer reads, so the first answer is quick.
-function warm(chat: BoxChat): void {
-  if (chat.warmed) return;
-  chat.warmed = true;
-  void request({ kind: "thread", pr: chat.pr, selection: chat.selection }).then((res) => {
-    if (res.ok) return;
-    chat.warmed = false;
-    chat.error = res.error;
-    render(chat);
-  });
+  render(current);
+  current.line.warm();
 }
 
 function improve(chat: BoxChat): void {
   const comment = chat.box.querySelector("textarea")?.value.trim();
-  if (comment) ask(chat, improvePrompt(comment), "Improve my comment", true);
-  else showError(chat, "Write a comment in the box below first.");
-}
-
-function showError(chat: BoxChat, message: string): void {
-  chat.error = message;
-  render(chat);
-}
-
-function ask(chat: BoxChat, question: string, label: string, fill: boolean): void {
-  if (chat.port) return;
-  chat.error = undefined;
-  const turn: Turn = { label, answer: "", streaming: true, breakBeforeText: false, fill };
-  chat.turns.push(turn);
-  const port = browser.runtime.connect({ name: ASK_PORT });
-  chat.port = port;
-  port.onMessage.addListener((event: unknown) => onEvent(chat, turn, event as StreamEvent));
-  port.onDisconnect.addListener(() => {
-    if (turn.streaming) onEvent(chat, turn, { type: "error", message: "Lost the connection to the extension." });
-  });
-  port.postMessage({ pr: chat.pr, question, selection: chat.selection } satisfies AskRequest);
-  render(chat);
-}
-
-function onEvent(chat: BoxChat, turn: Turn, event: StreamEvent): void {
-  switch (event.type) {
-    case "status":
-      turn.status = event.message;
-      break;
-    case "tool":
-      turn.status = `${event.name} ${event.detail}`.trim();
-      turn.breakBeforeText = true;
-      break;
-    case "text":
-      turn.answer += (turn.breakBeforeText && turn.answer ? "\n\n" : "") + event.text;
-      turn.breakBeforeText = false;
-      turn.status = undefined;
-      break;
-    case "done":
-    case "error":
-      turn.streaming = false;
-      turn.status = undefined;
-      if (event.type === "error") turn.error = event.message;
-      else if (turn.fill) fillComment(chat, commentFromAnswer(turn.answer));
-      chat.port?.disconnect();
-      chat.port = null;
-      break;
-  }
-  scheduleRender(chat);
+  if (comment) chat.line.ask(improvePrompt(comment), "Improve my comment", true);
+  else chat.line.fail("Write a comment in the box below first.");
 }
 
 // Writes into GitHub's own textarea. insertText goes through the browser's
@@ -217,7 +141,7 @@ function onEvent(chat: BoxChat, turn: Turn, event: StreamEvent): void {
 // previous text.
 function fillComment(chat: BoxChat, text: string): void {
   const textarea = chat.box.isConnected ? chat.box.querySelector("textarea") : null;
-  if (!textarea) return showError(chat, "The comment box is closed: open it on these lines again, then use the answer.");
+  if (!textarea) return chat.line.fail("The comment box is closed: open it on these lines again, then use the answer.");
   textarea.focus();
   textarea.select();
   if (!document.execCommand("insertText", false, text)) {
@@ -241,11 +165,11 @@ function scheduleRender(chat: BoxChat): void {
 function render(chat: BoxChat): void {
   const { turnsEl } = chat;
   const atBottom = turnsEl.scrollHeight - turnsEl.scrollTop - turnsEl.clientHeight < 40;
-  turnsEl.replaceChildren(...chat.turns.map((turn) => renderTurn(chat, turn)));
-  if (chat.error) turnsEl.append(h("div", { className: "error", textContent: chat.error }));
+  turnsEl.replaceChildren(...chat.line.turns.map((turn) => renderTurn(chat, turn)));
+  if (chat.line.error) turnsEl.append(h("div", { className: "error", textContent: chat.line.error }));
   turnsEl.hidden = turnsEl.childElementCount === 0;
-  chat.sendButton.replaceChildren(icon(chat.port ? "stop" : "send"));
-  chat.sendButton.title = chat.port ? "Stop" : "Ask (Enter)";
+  chat.sendButton.replaceChildren(icon(chat.line.busy ? "stop" : "send"));
+  chat.sendButton.title = chat.line.busy ? "Stop" : "Ask (Enter)";
   if (atBottom) turnsEl.scrollTop = turnsEl.scrollHeight;
 }
 

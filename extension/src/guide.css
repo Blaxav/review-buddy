@@ -89,7 +89,7 @@
 .place.current { background: var(--claude-soft); }
 .place .grow { display: flex; flex-direction: column; gap: 1px; }
 .place-title { font-weight: 600; }
-.place.walked .place-title { color: var(--fg-muted); font-weight: 500; }
+.place.checked .place-title { color: var(--fg-muted); font-weight: 500; }
 .place small { font-size: 12px; line-height: 1.4; color: var(--fg-muted); }
 .place .num {
   width: 22px;
@@ -105,7 +105,7 @@
   color: var(--fg-muted);
 }
 .place.current .num { background: var(--claude-text); color: var(--bg); }
-.place.walked .num { background: color-mix(in srgb, var(--success) 14%, var(--bg)); color: var(--success); }
+.place.checked .num { background: color-mix(in srgb, var(--success) 14%, var(--bg)); color: var(--success); }
 .place .num .icon { width: 12px; height: 12px; }
 .concern-mark { color: var(--danger); display: inline-flex; margin-top: 2px; }
 

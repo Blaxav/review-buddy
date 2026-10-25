@@ -17,6 +17,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* Revealed clear of GitHub's sticky headers and of the smart review bar. */
+  scroll-margin: 120px 0 88px;
 }
 header { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mark { display: inline-flex; }
@@ -34,9 +36,16 @@ header { display: flex; align-items: center; gap: 8px; min-width: 0; }
   font-weight: 600;
 }
 .tag.focus { background: var(--claude-soft); color: var(--claude-text); }
-button.ghost { border-color: transparent; background: none; color: var(--fg-muted); padding: 2px 8px; font-size: 12px; gap: 4px; }
+.tag.done { background: color-mix(in srgb, var(--success) 12%, var(--bg)); color: var(--success); }
+header .icon-button { padding: 3px; margin: -3px -6px -3px 0; }
+header .icon-button .icon { width: 14px; height: 14px; }
+button.ghost { border-color: transparent; background: none; color: var(--fg-muted); padding: 3px 8px; font-size: 12px; gap: 5px; }
 button.ghost:hover { background: var(--bg-muted); color: var(--fg); }
-button.ghost .icon { width: 12px; height: 12px; color: var(--claude); }
+button.ghost.active { background: var(--claude-soft); color: var(--fg); }
+button.ghost .icon { width: 13px; height: 13px; }
+button.ghost .icon-sparkle { color: var(--claude); }
+.muted { color: var(--fg-muted); font-size: 12px; white-space: nowrap; }
+.error { color: var(--danger); font-size: 12px; }
 
 p { margin: 0; line-height: 1.5; }
 .intent { color: var(--fg-muted); font-size: 12px; }
@@ -61,10 +70,48 @@ button.link { display: inline; border: 0; background: none; padding: 0; font-siz
 button.link:hover { background: none; text-decoration: underline; }
 code { font: 12px var(--mono); padding: 0 3px; border-radius: 4px; background: var(--bg-muted); }
 
-footer { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-footer .hint { font-size: 11px; color: var(--fg-muted); }
+/* Claude and the comment open between the note and the walk's buttons. */
+.section { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; margin-top: 2px; border-top: 1px solid var(--border-muted); }
+.section-head { font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 2px 10px; border-radius: 999px; border-color: var(--border-muted); }
+.chip.key { background: var(--claude-soft); border-color: color-mix(in srgb, var(--claude) 40%, var(--border)); }
+.chip.key:hover { background: color-mix(in srgb, var(--claude) 20%, var(--bg)); }
+.turns { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.turn { display: flex; flex-direction: column; gap: 6px; }
+.turn .question { font-size: 12px; font-weight: 600; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn .use { align-self: flex-start; font-size: 12px; padding: 2px 10px; border-radius: 999px; gap: 4px; }
+.turn .use .icon { width: 13px; height: 13px; }
+.input-box { border-radius: 10px; padding: 4px 4px 4px 10px; }
+.input-box textarea { font-size: 13px; height: 26px; padding: 3px 0; max-height: 120px; }
+.input-box .send { width: 24px; height: 24px; }
+.input-box .send .icon { width: 12px; height: 12px; }
+.comment textarea {
+  width: 100%;
+  min-height: 64px;
+  max-height: 240px;
+  padding: 8px 10px;
+  resize: vertical;
+  font: 13px/1.5 inherit;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+.comment textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+.comment-foot { display: flex; align-items: center; gap: 8px; }
+.comment-status { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.comment-actions { display: flex; gap: 6px; }
+.comment-actions button { padding: 3px 12px; font-size: 12px; }
+.posted { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--success); text-decoration: none; }
+.posted:hover { text-decoration: underline; }
+.posted .icon { width: 12px; height: 12px; }
+
+footer { display: flex; align-items: center; gap: 6px; margin-top: 2px; padding-top: 8px; border-top: 1px solid var(--border-muted); }
 footer button { padding: 3px 12px; font-size: 12px; }
-footer button.primary { padding: 3px 8px 3px 12px; gap: 2px; }
+footer button.primary { gap: 4px; padding: 3px 12px 3px 10px; }
 footer button .icon { width: 14px; height: 14px; }
 
 /* Another place worth checking: one line that opens its card. */
@@ -82,8 +129,12 @@ footer button .icon { width: 14px; height: 14px; }
   text-align: left;
 }
 .card.closed:hover { background: var(--claude-soft); }
-.card.closed.walked { border-style: solid; border-color: var(--border-muted); }
-.card.closed.walked .card-title, .card.closed.walked .position { color: var(--fg-muted); }
+/* Checked: folded, quiet, and still a click away. */
+.card.closed.checked { border-style: solid; border-color: var(--border-muted); }
+.card.closed.checked .card-title, .card.closed.checked .position { color: var(--fg-muted); font-weight: 500; }
+.card.closed.checked:hover { background: var(--bg-muted); }
+.check-mark { display: inline-flex; color: var(--success); }
+.check-mark .icon { width: 14px; height: 14px; }
 .summary-line { color: var(--fg-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card.closed > .icon { color: var(--danger); width: 14px; height: 14px; }
 
