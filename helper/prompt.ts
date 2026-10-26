@@ -11,7 +11,7 @@ const MAX_CHANGE_ROWS = 60;
 export function systemPrompt(pr: PrRef, info: PrInfo): string {
   return `You are helping a human review GitHub pull request ${pr.owner}/${pr.repo}#${pr.number}: "${info.title}".
 
-The working directory is a checkout of the PR head (${info.headRefOid}).
+The working directory is a checkout of the PR branch ${info.headRefName} (${info.headRefOid}).
 The base branch is ${info.baseRefName}; its tip is ${info.baseRefOid}.
 See the change with \`git diff ${info.baseRefOid}...HEAD\`, and read any file in the repository for context.
 

@@ -7,7 +7,7 @@ import { systemPrompt, threadPrompt } from "./prompt";
 
 const IDLE_TIMEOUT_MS = 30 * 60_000;
 
-// Read-only tools: Claude explores the checkout but cannot change it or reach the network.
+// Read-only tools for the smart review: Claude explores the checkout but cannot change it or reach the network.
 export const ALLOWED_TOOLS = ["Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)"];
 
 export class BusyError extends Error {
@@ -64,7 +64,7 @@ export class PrSession {
       // Skip the user's settings, plugins and MCP servers: they add seconds to startup.
       "--setting-sources", "",
       "--strict-mcp-config",
-      "--allowedTools", ...ALLOWED_TOOLS,
+      "--permission-mode", "bypassPermissions",
       "--append-system-prompt", this.prompt,
     ];
     if (this.claudeSessionId) args.push("--resume", this.claudeSessionId);

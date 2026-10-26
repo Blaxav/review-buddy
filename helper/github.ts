@@ -9,6 +9,7 @@ export type PrInfo = {
   body: string;
   baseRefName: string;
   baseRefOid: string;
+  headRefName: string;
   headRefOid: string;
 };
 
@@ -33,12 +34,13 @@ export async function fetchPrInfo(pr: PrRef): Promise<PrInfo> {
   const json = await run([
     "gh", "pr", "view", String(pr.number),
     "--repo", `${pr.owner}/${pr.repo}`,
-    "--json", "title,body,baseRefName,baseRefOid,headRefOid",
+    "--json", "title,body,baseRefName,baseRefOid,headRefName,headRefOid",
   ]);
   return JSON.parse(json) as PrInfo;
 }
 
-// Checks the PR head out in its own worktree, so several PRs can be open at once.
+// Checks the PR's branch out in its own worktree, so several PRs can be open at once.
+// `gh pr checkout` sets the branch's upstream, so a plain `git push` updates the PR.
 export async function checkoutPr(pr: PrRef): Promise<Checkout> {
   const info = await fetchPrInfo(pr);
   const repoDir = join(REPOS_DIR, pr.owner, pr.repo);
@@ -54,10 +56,10 @@ export async function checkoutPr(pr: PrRef): Promise<Checkout> {
 
   const dir = join(WORKTREES_DIR, pr.owner, pr.repo, `pr-${pr.number}`);
   if (existsSync(dir)) {
-    await run(["git", "checkout", "--quiet", "--detach", info.headRefOid], dir);
+    await run(["gh", "pr", "checkout", String(pr.number)], dir);
   } else {
     mkdirSync(dirname(dir), { recursive: true });
-    await run(["git", "worktree", "add", "--quiet", "--detach", dir, info.headRefOid], repoDir);
+    await run(["gh", "pr", "checkout", String(pr.number), "--worktree", dir], repoDir);
   }
   const mergeBase = (await run(["git", "merge-base", info.baseRefOid, info.headRefOid], dir)).trim();
   return { dir, info, mergeBase };
