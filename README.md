@@ -1,9 +1,9 @@
 # Review AI
 
-A Safari overlay on GitHub pull requests: ask Claude about the change, and post the review comments it drafts.
+A Safari and Chrome overlay on GitHub pull requests: ask Claude about the change, and post the review comments it drafts.
 
 ```
-github.com PR page in Safari
+github.com PR page in Safari or Chrome
  └─ overlay (content script)  ──►  background script  ──►  helper on 127.0.0.1:47823
                                                              ├─ claude -p   (your Claude subscription)
                                                              └─ gh api      (posts the comments you approve)
@@ -26,11 +26,16 @@ github.com PR page in Safari
 
 ## Setup
 
-Requires [Bun](https://bun.sh), the GitHub CLI logged in (`gh auth login`), Claude Code logged in (`claude`, then `/login`), and Xcode for the Safari wrapper.
+Requires [Bun](https://bun.sh), the GitHub CLI logged in (`gh auth login`), Claude Code logged in (`claude`, then `/login`), and Xcode for the Safari wrapper (Chrome needs nothing more).
 
 ```sh
 bun install
 ./scripts/install-launchd.sh   # helper runs now and at every login; logs in ~/.review-ai/helper.log
+```
+
+### Safari
+
+```sh
 ./scripts/make-safari-app.sh   # builds the app, installs it in /Applications and opens it once
 ```
 
@@ -40,12 +45,25 @@ Then:
 2. In Settings → Extensions, enable **Review AI** and allow it on `github.com`.
 3. Open a PR and click **Ask Claude**.
 
+### Chrome
+
+```sh
+bun run build:extension        # builds extension/dist
+```
+
+Then:
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Click **Load unpacked** and pick `extension/dist`.
+3. Open a PR and click **Ask Claude**.
+
 ## Development
 
 ```sh
 bun run check            # type check + tests
 bun run helper           # run the helper in the foreground (stop the launchd one first)
-./scripts/make-safari-app.sh  # after an extension change; then reload github.com
+./scripts/make-safari-app.sh  # after an extension change in Safari; then reload github.com
+bun run build:extension       # after an extension change in Chrome; then click reload on chrome://extensions and reload github.com
 bun run scripts/make-icons.ts # redraws extension/icons
 ```
 

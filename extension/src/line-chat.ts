@@ -1,4 +1,4 @@
-import type Browser from "webextension-polyfill";
+import browser, { type Runtime } from "webextension-polyfill";
 import { commentFromAnswer } from "../../shared/drafts";
 import type { AskRequest, LineSelection, PrRef, StreamEvent } from "../../shared/protocol";
 import { ASK_PORT } from "./messages";
@@ -34,7 +34,7 @@ export type Turn = {
 export class LineChat {
   turns: Turn[] = [];
   error?: string;
-  private port: Browser.Runtime.Port | null = null;
+  private port: Runtime.Port | null = null;
   private warmed = false;
 
   // `onChange` runs on every update, `onComment` with the comment an answer

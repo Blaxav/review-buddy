@@ -1,4 +1,4 @@
-import type Browser from "webextension-polyfill";
+import browser, { type Runtime } from "webextension-polyfill";
 import { HELPER_URL, type StreamEvent, type ThreadInfo } from "../../shared/protocol";
 import { ASK_PORT, GUIDE_PORT, type BackgroundRequest, type BackgroundResponse } from "./messages";
 
@@ -6,7 +6,7 @@ import { ASK_PORT, GUIDE_PORT, type BackgroundRequest, type BackgroundResponse }
 declare const HELPER_TOKEN: string;
 
 const UNREACHABLE = `The helper isn't reachable on ${HELPER_URL}. Start it with \`bun run helper\`.`;
-const STALE_TOKEN = "The helper's token changed since this extension was built. Rebuild it with ./scripts/make-safari-app.sh.";
+const STALE_TOKEN = "The helper's token changed since this extension was built. Rebuild it with ./scripts/make-safari-app.sh (Safari) or `bun run build:extension` (Chrome).";
 
 async function helperFetch(path: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
   let res: Response;
@@ -68,7 +68,7 @@ browser.runtime.onMessage.addListener((message: unknown) =>
 // the port and receives the endpoint's events. Closing the port cancels the fetch.
 const STREAMS: Record<string, string> = { [ASK_PORT]: "/ask", [GUIDE_PORT]: "/guide" };
 
-browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
+browser.runtime.onConnect.addListener((port: Runtime.Port) => {
   const path = STREAMS[port.name];
   if (!path) return;
   const abort = new AbortController();
@@ -78,6 +78,9 @@ browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
   };
 
   port.onMessage.addListener(async (message: unknown) => {
+    // Chrome stops a service worker after 30 s without an extension API call,
+    // and the smart review can stream nothing for minutes while Claude groups.
+    const keepAlive = setInterval(() => browser.runtime.getPlatformInfo(), 20_000);
     try {
       const res = await helperFetch(path, message, abort.signal);
       const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
@@ -92,6 +95,8 @@ browser.runtime.onConnect.addListener((port: Browser.Runtime.Port) => {
       }
     } catch (error) {
       send({ type: "error", message: error instanceof Error ? error.message : String(error) } satisfies StreamEvent);
+    } finally {
+      clearInterval(keepAlive);
     }
   });
 });

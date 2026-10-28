@@ -1,4 +1,4 @@
-import type Browser from "webextension-polyfill";
+import browser, { type Runtime } from "webextension-polyfill";
 import { parseDraftComments, stripDraftComments } from "../../shared/drafts";
 import { prKey, type DraftComment, type PrRef, type StreamEvent } from "../../shared/protocol";
 import { watchCommentBoxes } from "./comment-box";
@@ -32,7 +32,7 @@ type Answer = {
   el?: HTMLElement;
 };
 
-type Chat = { pr: PrRef; items: (Question | Answer)[]; port: Browser.Runtime.Port | null; warmed: boolean };
+type Chat = { pr: PrRef; items: (Question | Answer)[]; port: Runtime.Port | null; warmed: boolean };
 
 const chats = new Map<string, Chat>();
 let chat: Chat | null = null;

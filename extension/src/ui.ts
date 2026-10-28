@@ -1,3 +1,4 @@
+import browser from "webextension-polyfill";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { BackgroundRequest, BackgroundResponse } from "./messages";

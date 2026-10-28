@@ -1,4 +1,5 @@
-// Bundles the extension into extension/dist, the folder Safari's converter wraps.
+// Bundles the extension into extension/dist, the folder Safari's converter wraps
+// and Chrome loads unpacked.
 import { cpSync, rmSync } from "node:fs";
 import { loadToken } from "../helper/config";
 

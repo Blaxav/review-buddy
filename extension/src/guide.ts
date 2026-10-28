@@ -1,4 +1,4 @@
-import type Browser from "webextension-polyfill";
+import browser, { type Runtime } from "webextension-polyfill";
 import {
   linesToRead,
   linesToReview,
@@ -55,7 +55,7 @@ type Guide = {
   overview: boolean;
   // Set when the current place couldn't be found in the page.
   lost?: string;
-  port: Browser.Runtime.Port | null;
+  port: Runtime.Port | null;
 };
 
 const KINDS: { kind: ProvenKind; label: string }[] = [
