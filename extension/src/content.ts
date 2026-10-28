@@ -46,9 +46,11 @@ isolateEvents(root, ["keydown", "keyup", "keypress"]);
 
 const titleEl = h("span", { className: "title" });
 const body = h("div", { className: "body" });
+const resizer = h("div", { className: "resizer", tabIndex: 0, role: "separator", ariaOrientation: "vertical", ariaLabel: "Resize the panel", title: "Drag to resize · Double-click to reset" });
 const panel = h(
   "div",
   { className: "panel", hidden: true },
+  resizer,
   h(
     "div",
     { className: "header" },
@@ -68,6 +70,61 @@ root.append(h("style", { textContent: theme + css + guideCss }), panel, launcher
 panel.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setPanelOpen(false);
 });
+
+// --- Panel width ------------------------------------------------------------
+
+const DEFAULT_WIDTH = 420;
+const MIN_WIDTH = 320;
+const WIDTH_KEY = "review-ai-panel-width";
+
+// The page's margin and the review bar follow the panel through this variable.
+function setPanelWidth(width: number): number {
+  const clamped = Math.round(Math.max(MIN_WIDTH, Math.min(width, window.innerWidth - 32)));
+  document.documentElement.style.setProperty("--review-ai-panel-width", `${clamped}px`);
+  resizer.ariaValueNow = String(clamped);
+  resizer.ariaValueMin = String(MIN_WIDTH);
+  resizer.ariaValueMax = String(window.innerWidth - 32);
+  return clamped;
+}
+
+function savePanelWidth(width: number): void {
+  browser.storage.local.set({ [WIDTH_KEY]: width }).catch(() => {
+    // Without storage, the width lasts until the page reloads.
+  });
+}
+
+resizer.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  resizer.setPointerCapture(e.pointerId);
+  resizer.classList.add("dragging");
+  const startWidth = panel.offsetWidth;
+  const startX = e.clientX;
+  const move = (e: PointerEvent) => setPanelWidth(startWidth + startX - e.clientX);
+  resizer.addEventListener("pointermove", move);
+  resizer.addEventListener(
+    "lostpointercapture",
+    () => {
+      resizer.removeEventListener("pointermove", move);
+      resizer.classList.remove("dragging");
+      savePanelWidth(panel.offsetWidth);
+    },
+    { once: true },
+  );
+});
+resizer.addEventListener("dblclick", () => savePanelWidth(setPanelWidth(DEFAULT_WIDTH)));
+resizer.addEventListener("keydown", (e) => {
+  const step = e.key === "ArrowLeft" ? 40 : e.key === "ArrowRight" ? -40 : 0;
+  if (!step) return;
+  e.preventDefault();
+  savePanelWidth(setPanelWidth(panel.offsetWidth + step));
+});
+void browser.storage.local
+  .get(WIDTH_KEY)
+  .then((stored) => {
+    if (typeof stored[WIDTH_KEY] === "number") setPanelWidth(stored[WIDTH_KEY]);
+  })
+  .catch(() => {});
 
 const messagesEl = h("div", { className: "messages" });
 const input = h("textarea", { rows: 1, placeholder: "Ask about this PR…" });

@@ -34,7 +34,10 @@
 }
 @keyframes bar-in { from { opacity: 0; transform: translateY(8px); } }
 /* Beside the chat panel, the bar moves left of it. */
-.review-bar.docked { right: 468px; width: min(520px, calc(100vw - 520px)); }
+.review-bar.docked {
+  right: calc(var(--review-ai-panel-width, 420px) + 48px);
+  width: min(520px, calc(100vw - var(--review-ai-panel-width, 420px) - 100px));
+}
 
 .review-bar .row { display: flex; align-items: center; gap: 6px; min-height: 30px; min-width: 0; }
 .review-bar .row.error { min-height: 0; padding: 0 4px 4px 0; line-height: 1.4; }

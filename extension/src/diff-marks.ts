@@ -23,7 +23,7 @@ td[${PROVEN}] { opacity: 0.35; transition: opacity 0.15s; }
 tr:hover > td[${PROVEN}] { opacity: 1; }
 td[${FOCUS}] { background-image: linear-gradient(rgb(217 119 87 / 0.08), rgb(217 119 87 / 0.08)) !important; }
 td[${FOCUS_EDGE}] { box-shadow: inset 4px 0 0 #d97757 !important; }
-html.${DOCKED} body { margin-right: 452px; }
+html.${DOCKED} body { margin-right: calc(var(--review-ai-panel-width, 420px) + 32px); }
 @media (max-width: 1100px) { html.${DOCKED} body { margin-right: 0; } }
 `;
 
