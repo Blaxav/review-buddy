@@ -41,8 +41,6 @@ export async function fetchPrInfo(pr: PrRef): Promise<PrInfo> {
 
 // Checks the PR's branch out in its own worktree, so several PRs can be open at once.
 // `gh pr checkout` sets the branch's upstream, so a plain `git push` updates the PR.
-// The PR on GitHub is the source of truth: `--force` resets the local branch to it,
-// discarding local commits and edits, so a force-pushed PR checks out again.
 export async function checkoutPr(pr: PrRef): Promise<Checkout> {
   const info = await fetchPrInfo(pr);
   const repoDir = join(REPOS_DIR, pr.owner, pr.repo);
@@ -58,7 +56,10 @@ export async function checkoutPr(pr: PrRef): Promise<Checkout> {
 
   const dir = join(WORKTREES_DIR, pr.owner, pr.repo, `pr-${pr.number}`);
   if (existsSync(dir)) {
-    await run(["gh", "pr", "checkout", String(pr.number), "--force"], dir);
+    // After a force push the local branch can't fast-forward. The PR on GitHub is the
+    // source of truth, so `--force` resets the branch to it, dropping local commits and edits.
+    const checkout = ["gh", "pr", "checkout", String(pr.number)];
+    await run(checkout, dir).catch(() => run([...checkout, "--force"], dir));
   } else {
     mkdirSync(dirname(dir), { recursive: true });
     await run(["gh", "pr", "checkout", String(pr.number), "--worktree", dir], repoDir);
