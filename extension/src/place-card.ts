@@ -245,7 +245,7 @@ export class PlaceCard {
   }
 
   private renderTurn(turn: Turn): HTMLElement {
-    const el = h("div", { className: "turn" }, h("div", { className: "question", textContent: turn.label, title: turn.label }));
+    const el = h("div", { className: "turn" }, h("div", { className: "question", textContent: turn.label }));
     if (turn.answer) el.append(renderMarkdown(stripDraftComments(turn.answer)));
     if (turn.status) el.append(h("div", { className: "status", textContent: turn.status }));
     if (turn.error) el.append(h("div", { className: "error", textContent: turn.error }));

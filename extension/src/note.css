@@ -79,7 +79,7 @@ code { font: 12px var(--mono); padding: 0 3px; border-radius: 4px; background: v
 .chip.key:hover { background: color-mix(in srgb, var(--claude) 20%, var(--bg)); }
 .turns { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .turn { display: flex; flex-direction: column; gap: 6px; }
-.turn .question { font-size: 12px; font-weight: 600; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn .question { align-self: flex-end; max-width: 85%; font-size: 13px; background: color-mix(in srgb, var(--accent) 10%, var(--bg)); border-radius: 14px 14px 4px 14px; padding: 6px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .turn .use { align-self: flex-start; font-size: 12px; padding: 2px 10px; border-radius: 999px; gap: 4px; }
 .turn .use .icon { width: 13px; height: 13px; }
 .input-box { border-radius: 10px; padding: 4px 4px 4px 10px; }
