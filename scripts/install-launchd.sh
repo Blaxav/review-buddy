@@ -37,7 +37,7 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Helper running. Logs: ~/.review-ai/helper.log"
 
-# The helper reads `baseRefOid` from `gh pr view`, which gh 2.63 added.
+# The helper checks PRs out with `gh pr checkout --worktree`, which gh 2.98 added.
 gh_version=$(PATH="$HELPER_PATH" gh --version 2>/dev/null | awk 'NR == 1 { print $3 }')
 if [ -z "$gh_version" ]; then
   echo "Warning: the GitHub CLI (gh) isn't installed. Install it with \`brew install gh\`, then run \`gh auth login\`." >&2
@@ -45,7 +45,7 @@ else
   major=${gh_version%%.*}
   minor=${gh_version#*.}
   minor=${minor%%.*}
-  if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 63 ]; }; then
-    echo "Warning: gh $gh_version is too old; Review AI needs gh 2.63 or newer. Update it with \`brew upgrade gh\`." >&2
+  if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 98 ]; }; then
+    echo "Warning: gh $gh_version is too old; Review AI needs gh 2.98 or newer. Update it with \`brew upgrade gh\`." >&2
   fi
 fi

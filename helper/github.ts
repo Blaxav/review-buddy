@@ -61,10 +61,8 @@ export async function checkoutPr(pr: PrRef): Promise<Checkout> {
     const checkout = ["gh", "pr", "checkout", String(pr.number)];
     await run(checkout, dir).catch(() => run([...checkout, "--force"], dir));
   } else {
-    // `gh pr checkout --worktree` needs gh 2.98, so git makes the worktree and gh checks the PR out in it.
     mkdirSync(dirname(dir), { recursive: true });
-    await run(["git", "worktree", "add", "--detach", dir, `refs/review-ai/pr-${pr.number}`], repoDir);
-    await run(["gh", "pr", "checkout", String(pr.number)], dir);
+    await run(["gh", "pr", "checkout", String(pr.number), "--worktree", dir], repoDir);
   }
   const mergeBase = (await run(["git", "merge-base", info.baseRefOid, info.headRefOid], dir)).trim();
   return { dir, info, mergeBase };
