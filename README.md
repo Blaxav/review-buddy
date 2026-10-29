@@ -10,7 +10,7 @@ Everything runs on your Mac, with your own Claude subscription and your own GitH
 
 - macOS
 - [Bun](https://bun.sh): `curl -fsSL https://bun.sh/install | bash`
-- The GitHub CLI, logged in: `brew install gh`, then `gh auth login`
+- The GitHub CLI 2.63 or newer, logged in: `brew install gh`, then `gh auth login`
 - Claude Code, logged in: run `claude`, then `/login`
 - Safari only: the full Xcode from the App Store
 

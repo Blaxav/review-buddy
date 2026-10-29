@@ -7,12 +7,13 @@ cd "$(dirname "$0")/.."
 LABEL=ai.review-ai.helper
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 BIN="$HOME/.review-ai/bin/review-ai-helper"
+# launchd starts agents with a bare PATH; the helper needs claude, gh and git.
+HELPER_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 bun run build:helper
 mkdir -p "$(dirname "$BIN")" "$HOME/Library/LaunchAgents"
 cp dist/review-ai-helper "$BIN"
 
-# launchd starts agents with a bare PATH; the helper needs claude, gh and git.
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -22,7 +23,7 @@ cat > "$PLIST" <<EOF
   <key>ProgramArguments</key><array><string>$BIN</string></array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$HELPER_PATH</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -35,3 +36,16 @@ EOF
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "Helper running. Logs: ~/.review-ai/helper.log"
+
+# The helper reads `baseRefOid` from `gh pr view`, which gh 2.63 added.
+gh_version=$(PATH="$HELPER_PATH" gh --version 2>/dev/null | awk 'NR == 1 { print $3 }')
+if [ -z "$gh_version" ]; then
+  echo "Warning: the GitHub CLI (gh) isn't installed. Install it with \`brew install gh\`, then run \`gh auth login\`." >&2
+else
+  major=${gh_version%%.*}
+  minor=${gh_version#*.}
+  minor=${minor%%.*}
+  if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 63 ]; }; then
+    echo "Warning: gh $gh_version is too old; Review AI needs gh 2.63 or newer. Update it with \`brew upgrade gh\`." >&2
+  fi
+fi
